@@ -17,7 +17,7 @@ function field(label, input, hint) {
 export async function connectDialog(prefill = {}) {
   let mode = prefill.mode || (prefill.classCode ? 'student' : 'owner');
   const url = h('input', { class: 'input', type: 'url', placeholder: 'https://script.google.com/macros/s/…/exec', value: prefill.url || '' });
-  const key = h('input', { class: 'input', type: 'password', placeholder: 'Code.gs에 적은 OWNER_KEY', value: '' });
+  const key = h('input', { class: 'input', type: 'password', placeholder: '시트 “설정” 탭의 관리자 비밀번호', value: '' });
   const code = h('input', { class: 'input', type: 'text', placeholder: '선생님이 알려 준 수업 코드', value: prefill.classCode || '' });
   const name = h('input', { class: 'input', type: 'text', placeholder: '예: 10213 김하늘', value: prefill.name || '' });
   const body = h('div', { class: 'form' });
@@ -36,6 +36,8 @@ export async function connectDialog(prefill = {}) {
   };
   draw();
   for (;;) {
+    // 링크로 주소가 이미 들어와 있으면 비밀번호(또는 이름) 칸부터 쓰게 한다
+    if (prefill.url) setTimeout(() => (mode === 'owner' ? key : name).focus(), 120);
     const ok = await dialog({
       title: '클라우드 연결',
       body,

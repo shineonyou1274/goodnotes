@@ -6,22 +6,13 @@
  *  - 페이지 그림을 드라이브의 글자 인식(OCR)으로 읽어 시트에 적고, 손글씨 검색에 쓴다.
  *  - 관리자(나)는 모든 노트를 보고, 학생은 자기 노트만 올리고 내려받는다.
  *
- * 설치 방법은 apps-script/설치안내.md 를 보세요.
+ * 이 코드는 고칠 필요가 없습니다. 비밀번호와 반 목록은 시트의 '설정' 탭에서 바꿉니다.
+ * 설치 방법: https://shineonyou1274.github.io/goodnotes/setup.html
  */
 
-/* ===== 여기만 바꾸세요 ===== */
-// 관리자 비밀번호 (8자 이상, 학생에게 알려 주지 마세요)
-const OWNER_KEY = '여기에-나만-아는-비밀번호';
-
-// 수업(반) 목록: '수업 코드': '화면에 보일 이름'
-// 반마다 한 줄씩 적습니다. 혼자 쓸 때는 {} 처럼 비워 두세요.
-const CLASSES = {
-  // 'suhak-2-3': '2학년 3반 수학',
-  // 'suhak-2-4': '2학년 4반 수학',
-};
-/* ============================ */
-
-const DEFAULT_KEY = '여기에-나만-아는-비밀번호';
+const DEFAULT_APP_URL = 'https://shineonyou1274.github.io/goodnotes/';
+const SETTINGS_SHEET = '설정';
+const CLASS_START_ROW = 6; // '설정' 탭에서 반 목록이 시작하는 줄
 const ROOT_FOLDER = '노트 앱 저장소';
 const NOTES_SHEET = '노트';
 const TEXT_SHEET = '페이지 글자';
@@ -46,13 +37,16 @@ function doPost(e) {
 }
 
 const ACTIONS = {
-  ping: (req, who) => ({
-    role: who.role,
-    name: who.name,
-    className: who.cls,
-    // 관리자에게만 반 목록(초대 링크용)을 알려 준다
-    classes: who.role === 'owner' ? Object.keys(CLASSES).map((code) => ({ code: code, name: CLASSES[code] })) : undefined,
-  }),
+  ping: (req, who) => {
+    let classes;
+    if (who.role === 'owner') {
+      // 관리자에게만 반 목록(초대 링크용)을 알려 주고, 시트의 초대 링크도 채운다
+      const st = settings_();
+      classes = Object.keys(st.classes).map((code) => ({ code: code, name: st.classes[code] }));
+      try { refreshLinks_(); } catch (e) { /* 링크 채우기는 실패해도 된다 */ }
+    }
+    return { role: who.role, name: who.name, className: who.cls, classes: classes };
+  },
   list: listNotes_,
   upload: uploadNote_,
   ocr: ocrPages_,
@@ -63,20 +57,122 @@ const ACTIONS = {
 
 /* ---------- 권한 ---------- */
 function authorize_(req) {
+  const st = settings_();
   if (req.key !== undefined) {
-    if (OWNER_KEY === DEFAULT_KEY || OWNER_KEY.length < 8) {
-      throw new Error('Code.gs 맨 위의 OWNER_KEY를 8자 이상 나만 아는 비밀번호로 바꾼 뒤 다시 배포하세요.');
-    }
-    if (req.key !== OWNER_KEY) throw new Error('비밀번호가 맞지 않습니다.');
+    if (st.key.length < 8) throw new Error("시트 '설정' 탭의 관리자 비밀번호를 8자 이상으로 적어 주세요.");
+    if (String(req.key) !== st.key) throw new Error('비밀번호가 맞지 않습니다.');
     return { role: 'owner', owner: 'owner', name: '관리자', cls: '' };
   }
-  if (!Object.keys(CLASSES).length) throw new Error('이 저장소는 학생 참여를 받지 않습니다. (CLASSES가 비어 있음)');
-  const code = String(req.classCode || '');
-  if (!Object.prototype.hasOwnProperty.call(CLASSES, code)) throw new Error('수업 코드가 맞지 않습니다.');
+  if (!Object.keys(st.classes).length) throw new Error("이 저장소는 학생 참여를 받지 않습니다. (시트 '설정' 탭에 반이 없음)");
+  const code = String(req.classCode || '').trim();
+  if (!Object.prototype.hasOwnProperty.call(st.classes, code)) throw new Error('수업 코드가 맞지 않습니다.');
   if (!req.token || String(req.token).length < 16) throw new Error('기기 정보가 올바르지 않습니다.');
   const name = String(req.name || '').trim().slice(0, 40);
   if (!name) throw new Error('이름을 입력하세요.');
-  return { role: 'student', owner: hash_(req.token), name, cls: CLASSES[code] || code };
+  return { role: 'student', owner: hash_(req.token), name, cls: st.classes[code] || code };
+}
+
+/* ---------- '설정' 탭 ---------- */
+function randomText_(n) {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < n; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  return out;
+}
+
+function settingsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('이 스크립트는 구글 시트의 [확장 프로그램 → Apps Script]에서 만들어야 합니다.');
+  let sh = ss.getSheetByName(SETTINGS_SHEET);
+  if (sh) return sh;
+  sh = ss.insertSheet(SETTINGS_SHEET, 0);
+  sh.getRange(1, 1, 5, 3).setValues([
+    ['관리자 비밀번호', randomText_(10), '← 노트 앱에서 "내 저장소(관리자)"로 연결할 때 씁니다. 학생에게 알려 주지 마세요. 원하면 8자 이상으로 바꿔도 됩니다.'],
+    ['노트 앱 주소', DEFAULT_APP_URL, '← 보통은 그대로 둡니다.'],
+    ['관리자 연결 링크', '', '← 배포한 뒤 자동으로 채워집니다. 내 태블릿에서 이 링크를 열고 비밀번호만 넣으면 연결됩니다.'],
+    ['', '', ''],
+    ['반 이름', '수업 코드', '학생 초대 링크'],
+  ]);
+  sh.getRange(1, 1, 3, 1).setFontWeight('bold');
+  sh.getRange(5, 1, 1, 3).setFontWeight('bold').setBackground('#eef2fd');
+  sh.getRange(1, 2).setBackground('#fff6d6');
+  sh.getRange(1, 3, 3, 1).setFontColor('#6e6e73');
+  sh.getRange(4, 1).setValue('아래 “반 이름” 칸에 반을 한 줄에 하나씩 적으세요 (예: 2학년 3반 수학). 수업 코드와 초대 링크는 자동으로 채워집니다. 혼자 쓸 때는 비워 두세요.');
+  sh.getRange(4, 1).setFontColor('#3a6df0');
+  sh.setColumnWidth(1, 170);
+  sh.setColumnWidth(2, 220);
+  sh.setColumnWidth(3, 520);
+  return sh;
+}
+
+// 비밀번호와 반 목록을 읽는다. 수업 코드가 빈 반에는 코드를 새로 만들어 적는다.
+function settings_() {
+  const sh = settingsSheet_();
+  const last = Math.max(sh.getLastRow(), CLASS_START_ROW);
+  const v = sh.getRange(1, 1, last, 3).getValues();
+  const classes = {};
+  for (let i = CLASS_START_ROW - 1; i < v.length; i++) {
+    const name = String(v[i][0] || '').trim();
+    if (!name) continue;
+    let code = String(v[i][1] || '').trim();
+    if (!code || classes[code]) {
+      code = randomText_(6);
+      sh.getRange(i + 1, 2).setValue(code);
+      v[i][1] = code;
+    }
+    classes[code] = name;
+  }
+  return {
+    key: String(v[0][1] || '').trim(),
+    appUrl: String(v[1][1] || '').trim() || DEFAULT_APP_URL,
+    classes: classes,
+    sheet: sh,
+    values: v,
+  };
+}
+
+// '설정' 탭에 웹 앱 주소와 반별 초대 링크를 채운다
+function refreshLinks_() {
+  const st = settings_();
+  let webUrl = '';
+  try { webUrl = ScriptApp.getService().getUrl() || ''; } catch (e) { webUrl = ''; }
+  if (!/\/exec$/.test(webUrl)) return false;
+  const sh = st.sheet;
+  const base = st.appUrl.replace(/#.*$/, '');
+  const adminLink = base + '#/join?u=' + encodeURIComponent(webUrl);
+  if (st.values[2][1] !== adminLink) sh.getRange(3, 2).setValue(adminLink);
+  for (let i = CLASS_START_ROW - 1; i < st.values.length; i++) {
+    const code = String(st.values[i][1] || '').trim();
+    const name = String(st.values[i][0] || '').trim();
+    const link = name && code ? base + '#/join?u=' + encodeURIComponent(webUrl) + '&c=' + encodeURIComponent(code) : '';
+    if (st.values[i][2] !== link) sh.getRange(i + 1, 3).setValue(link);
+  }
+  return true;
+}
+
+// 시트를 열면 '노트 앱' 메뉴를 보여 준다
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('노트 앱')
+    .addItem('초대 링크 만들기', '초대링크만들기')
+    .addItem('설치 확인', '설치확인')
+    .addToUi();
+}
+
+// '설정' 탭에 반 이름을 적으면 수업 코드를 바로 채운다
+function onEdit(e) {
+  try {
+    const sh = e.range.getSheet();
+    if (sh.getName() !== SETTINGS_SHEET || e.range.getRow() < CLASS_START_ROW) return;
+    settings_();
+  } catch (err) { /* 무시 */ }
+}
+
+function 초대링크만들기() {
+  const ok = refreshLinks_();
+  const msg = ok
+    ? "'설정' 탭의 C열에 반별 초대 링크를 채웠습니다. 링크를 그 반 학생들에게 보내 주세요."
+    : '먼저 [배포 → 새 배포]로 웹 앱을 배포한 뒤 다시 눌러 주세요.';
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
 }
 
 function hash_(s) {
@@ -256,19 +352,43 @@ function ocrPages_(req, who) {
 
 function ocrImage_(blob) {
   let id;
-  if (typeof Drive === 'undefined') {
-    throw new Error('Apps Script 편집기 왼쪽 [서비스 +]에서 Drive API를 추가하세요.');
-  }
-  if (Drive.Files.create) {
-    id = Drive.Files.create({ name: 'ocr-temp', mimeType: MimeType.GOOGLE_DOCS }, blob, { ocrLanguage: 'ko' }).id;
+  if (typeof Drive !== 'undefined' && Drive.Files) {
+    // [서비스 +]에서 Drive API를 추가한 경우
+    if (Drive.Files.create) {
+      id = Drive.Files.create({ name: 'ocr-temp', mimeType: MimeType.GOOGLE_DOCS }, blob, { ocrLanguage: 'ko' }).id;
+    } else {
+      id = Drive.Files.insert({ title: 'ocr-temp', mimeType: MimeType.GOOGLE_DOCS }, blob, { ocr: true, ocrLanguage: 'ko' }).id;
+    }
   } else {
-    id = Drive.Files.insert({ title: 'ocr-temp', mimeType: MimeType.GOOGLE_DOCS }, blob, { ocr: true, ocrLanguage: 'ko' }).id;
+    id = ocrUpload_(blob);
   }
   try {
     return DocumentApp.openById(id).getBody().getText().replace(/\s+\n/g, '\n').trim();
   } finally {
     trash_(id);
   }
+}
+
+// Drive API 서비스를 추가하지 않아도 되도록 드라이브에 직접 올려 문서로 바꾼다 (글자 인식)
+function ocrUpload_(blob) {
+  const boundary = 'goodnotes' + Date.now();
+  const head = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'
+    + JSON.stringify({ name: 'ocr-temp', mimeType: 'application/vnd.google-apps.document' })
+    + '\r\n--' + boundary + '\r\nContent-Type: ' + (blob.getContentType() || 'image/jpeg') + '\r\n\r\n';
+  const tail = '\r\n--' + boundary + '--';
+  const payload = Utilities.newBlob(head).getBytes().concat(blob.getBytes(), Utilities.newBlob(tail).getBytes());
+  const res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=ko&fields=id', {
+    method: 'post',
+    contentType: 'multipart/related; boundary=' + boundary,
+    payload: payload,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() >= 300) {
+    throw new Error('글자 인식을 쓸 수 없습니다. Apps Script 편집기 왼쪽 [서비스 +]에서 Drive API를 추가해 주세요. ('
+      + res.getResponseCode() + ')');
+  }
+  return JSON.parse(res.getContentText()).id;
 }
 
 // 노트 목록 시트의 '인식된 글자' 칸을 페이지 순서대로 다시 채운다
@@ -349,12 +469,15 @@ function removeNote_(req, who) {
 
 /* 설치 확인용: 편집기에서 이 함수를 한 번 실행하면 권한 승인과 시트·폴더 만들기가 끝납니다. */
 function 설치확인() {
+  const st = settings_();
   notesSheet_();
   textSheet_();
   folder_([]);
   const blank = Utilities.newBlob(Utilities.base64Decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII='), 'image/png', 'test.png');
   try { ocrImage_(blank); } catch (e) { throw new Error('글자 인식 준비가 안 됐습니다: ' + e.message); }
-  Logger.log('준비 완료! 이제 [배포 → 새 배포]를 하세요.');
+  const linked = refreshLinks_();
+  Logger.log('준비 완료! 관리자 비밀번호: ' + st.key);
+  Logger.log(linked ? "'설정' 탭에 초대 링크를 채웠습니다." : '이제 [배포 → 새 배포]를 하세요.');
 }
 
