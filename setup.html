@@ -46,7 +46,8 @@
   <ol>
     <li><a href="https://sheets.new" target="_blank" rel="noopener">새 구글 시트</a>를 만들고 이름을 <b>노트 앱 저장소</b>로 바꿉니다.</li>
     <li>시트 위쪽 메뉴에서 <b>확장 프로그램 → Apps Script</b>를 누릅니다.</li>
-    <li>열린 편집기의 <code>Code.gs</code>에 있는 내용을 모두 지우고, 아래 코드를 복사해 붙여 넣은 뒤 <kbd>Ctrl/⌘ + S</kbd>로 저장합니다. <b>코드는 고치지 않습니다.</b></li>
+    <li>열린 편집기의 <code>Code.gs</code>를 한 번 누르고 <kbd>Ctrl/⌘ + A</kbd>로 전부 고른 뒤, 아래 <b>코드 복사</b> 버튼으로 복사한 코드를 붙여 넣고 <kbd>Ctrl/⌘ + S</kbd>로 저장합니다. <b>코드는 고치지 않습니다.</b></li>
+    <li>편집기 맨 아래까지 내려서 마지막 줄이 <code>// ===== 코드 끝 …</code>인지 확인합니다. 이 줄이 없으면 일부만 붙여 넣어진 것이니 다시 붙여 넣으세요. (<a href="apps-script/Code.gs" download="Code.gs">Code.gs 파일로 받기</a>)</li>
   </ol>
   <div class="code-wrap">
     <button class="btn primary copy" id="copy">코드 복사</button>
@@ -126,7 +127,7 @@
   fetch('apps-script/Code.gs').then((r) => r.text()).then((t) => { document.getElementById('code').textContent = t; });
   document.getElementById('copy').addEventListener('click', async (e) => {
     const t = document.getElementById('code').textContent;
-    try { await navigator.clipboard.writeText(t); e.target.textContent = '복사했습니다'; }
+    try { await navigator.clipboard.writeText(t); e.target.textContent = `${t.split('\n').length}줄 복사했습니다`; }
     catch { const r = document.createRange(); r.selectNodeContents(document.getElementById('code')); getSelection().removeAllRanges(); getSelection().addRange(r); e.target.textContent = '선택됨 — 복사하세요'; }
     setTimeout(() => { e.target.textContent = '코드 복사'; }, 2000);
   });
