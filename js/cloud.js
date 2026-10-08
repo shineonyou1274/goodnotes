@@ -222,8 +222,8 @@ export async function openRemote(remote) {
   return downloadNotebook(remote, { asCopy: !remote.mine });
 }
 
-export function inviteLink(cfg, appUrl = location.href.split('#')[0]) {
-  const p = new URLSearchParams({ u: cfg.url, c: cfg.classCode || '' });
+export function inviteLink(cfg, code, appUrl = location.href.split('#')[0]) {
+  const p = new URLSearchParams({ u: cfg.url, c: code });
   return `${appUrl}#/join?${p}`;
 }
 

@@ -9,19 +9,25 @@
  * 설치 방법은 apps-script/설치안내.md 를 보세요.
  */
 
-/* ===== 여기 세 줄만 바꾸세요 ===== */
-const OWNER_KEY = '여기에-나만-아는-비밀번호';  // 관리자 비밀번호 (8자 이상, 남에게 알려 주지 마세요)
-const CLASS_CODE = '';                          // 학생에게 알려 줄 수업 코드. 비워 두면 혼자 쓰는 저장소가 됩니다.
-const CLASS_NAME = '';                          // 학생 화면에 보일 수업 이름 (예: '3학년 2반 수학')
-/* ================================== */
+/* ===== 여기만 바꾸세요 ===== */
+// 관리자 비밀번호 (8자 이상, 학생에게 알려 주지 마세요)
+const OWNER_KEY = '여기에-나만-아는-비밀번호';
+
+// 수업(반) 목록: '수업 코드': '화면에 보일 이름'
+// 반마다 한 줄씩 적습니다. 혼자 쓸 때는 {} 처럼 비워 두세요.
+const CLASSES = {
+  // 'suhak-2-3': '2학년 3반 수학',
+  // 'suhak-2-4': '2학년 4반 수학',
+};
+/* ============================ */
 
 const DEFAULT_KEY = '여기에-나만-아는-비밀번호';
 const ROOT_FOLDER = '노트 앱 저장소';
 const NOTES_SHEET = '노트';
 const TEXT_SHEET = '페이지 글자';
-const NOTE_HEADERS = ['노트 ID', '제목', '이름', '소유자', '수정 시각', '쪽 수', '노트 파일', 'PDF', '인식된 글자'];
+const NOTE_HEADERS = ['노트 ID', '제목', '반', '이름', '소유자', '수정 시각', '쪽 수', '노트 파일', 'PDF', '인식된 글자'];
 const TEXT_HEADERS = ['노트 ID', '쪽', '페이지 ID', '인식된 글자', '인식 시각'];
-const C = { id: 0, title: 1, name: 2, owner: 3, updated: 4, pages: 5, file: 6, pdf: 7, text: 8 };
+const C = { id: 0, title: 1, cls: 2, name: 3, owner: 4, updated: 5, pages: 6, file: 7, pdf: 8, text: 9 };
 
 function doGet() {
   return out_({ ok: true, app: 'goodnotes-web', message: '노트 앱 서버가 동작 중입니다.' });
@@ -43,8 +49,9 @@ const ACTIONS = {
   ping: (req, who) => ({
     role: who.role,
     name: who.name,
-    className: CLASS_NAME,
-    classCode: who.role === 'owner' ? CLASS_CODE : undefined,
+    className: who.cls,
+    // 관리자에게만 반 목록(초대 링크용)을 알려 준다
+    classes: who.role === 'owner' ? Object.keys(CLASSES).map((code) => ({ code: code, name: CLASSES[code] })) : undefined,
   }),
   list: listNotes_,
   upload: uploadNote_,
@@ -61,14 +68,15 @@ function authorize_(req) {
       throw new Error('Code.gs 맨 위의 OWNER_KEY를 8자 이상 나만 아는 비밀번호로 바꾼 뒤 다시 배포하세요.');
     }
     if (req.key !== OWNER_KEY) throw new Error('비밀번호가 맞지 않습니다.');
-    return { role: 'owner', owner: 'owner', name: '관리자' };
+    return { role: 'owner', owner: 'owner', name: '관리자', cls: '' };
   }
-  if (!CLASS_CODE) throw new Error('이 저장소는 학생 참여를 받지 않습니다. (CLASS_CODE가 비어 있음)');
-  if (req.classCode !== CLASS_CODE) throw new Error('수업 코드가 맞지 않습니다.');
+  if (!Object.keys(CLASSES).length) throw new Error('이 저장소는 학생 참여를 받지 않습니다. (CLASSES가 비어 있음)');
+  const code = String(req.classCode || '');
+  if (!Object.prototype.hasOwnProperty.call(CLASSES, code)) throw new Error('수업 코드가 맞지 않습니다.');
   if (!req.token || String(req.token).length < 16) throw new Error('기기 정보가 올바르지 않습니다.');
   const name = String(req.name || '').trim().slice(0, 40);
   if (!name) throw new Error('이름을 입력하세요.');
-  return { role: 'student', owner: hash_(req.token), name };
+  return { role: 'student', owner: hash_(req.token), name, cls: CLASSES[code] || code };
 }
 
 function hash_(s) {
@@ -145,6 +153,7 @@ function listNotes_(req, who) {
     .map((x) => ({
       id: x.r[C.id],
       title: x.r[C.title],
+      cls: x.r[C.cls],
       name: x.r[C.name],
       mine: x.r[C.owner] === who.owner,
       updatedAt: Number(x.r[C.updated]) || 0,
@@ -160,13 +169,13 @@ function uploadNote_(req, who) {
   const existing = findNote_(meta.id);
   if (existing && existing.r[C.owner] !== who.owner) throw new Error('다른 사람의 노트는 바꿀 수 없습니다.');
 
-  const ownerFolder = who.role === 'owner' ? '관리자' : cleanName_(who.name);
-  const dataFile = folder_(['노트 파일', ownerFolder])
+  const ownerFolder = who.role === 'owner' ? ['관리자'] : [cleanName_(who.cls), cleanName_(who.name)];
+  const dataFile = folder_(['노트 파일'].concat(ownerFolder))
     .createFile(Utilities.newBlob(req.data, 'application/json', cleanName_(meta.title) + '.gnote'));
   let pdfUrl = '';
   if (req.pdf) {
     const pdfName = (who.role === 'owner' ? '' : cleanName_(who.name) + ' - ') + cleanName_(meta.title) + '.pdf';
-    const pdf = folder_(['PDF', ownerFolder]).createFile(Utilities.newBlob(Utilities.base64Decode(req.pdf), 'application/pdf', pdfName));
+    const pdf = folder_(['PDF'].concat(ownerFolder)).createFile(Utilities.newBlob(Utilities.base64Decode(req.pdf), 'application/pdf', pdfName));
     pdfUrl = pdf.getUrl();
   }
 
@@ -176,7 +185,7 @@ function uploadNote_(req, who) {
     const sh = notesSheet_();
     const cur = findNote_(meta.id);
     const values = [
-      meta.id, String(meta.title || '제목 없음'), who.role === 'owner' ? '관리자' : who.name, who.owner,
+      meta.id, String(meta.title || '제목 없음'), who.cls, who.role === 'owner' ? '관리자' : who.name, who.owner,
       Number(meta.updatedAt) || Date.now(), Number(meta.pages) || 0, dataFile.getId(), pdfUrl,
       cur ? cur.r[C.text] : '',
     ];
@@ -295,7 +304,7 @@ function searchText_(req, who) {
   Object.keys(notes).forEach((id) => {
     const r = notes[id];
     if (terms.every((t) => norm_(r[C.title]).indexOf(t) >= 0)) {
-      results.push({ id: id, title: r[C.title], name: r[C.name], mine: r[C.owner] === who.owner, page: 0, pageId: '', snippet: '' });
+      results.push({ id: id, title: r[C.title], cls: r[C.cls], name: r[C.name], mine: r[C.owner] === who.owner, page: 0, pageId: '', snippet: '' });
     }
   });
   // 손글씨(인식된 글자)에서 찾기
@@ -306,7 +315,7 @@ function searchText_(req, who) {
     const flat = norm_(text);
     if (!terms.every((t) => flat.indexOf(t) >= 0)) return;
     results.push({
-      id: x.r[0], title: r[C.title], name: r[C.name], mine: r[C.owner] === who.owner,
+      id: x.r[0], title: r[C.title], cls: r[C.cls], name: r[C.name], mine: r[C.owner] === who.owner,
       page: x.r[1], pageId: x.r[2], snippet: snippet_(text, terms[0]),
     });
   });

@@ -52,7 +52,7 @@ export async function connectDialog(prefill = {}) {
       const info = await ping(cfg);
       progress(null);
       cfg.className = info.className || '';
-      cfg.classCode = mode === 'owner' ? (info.classCode || '') : cfg.classCode;
+      if (mode === 'owner') cfg.classes = info.classes || [];
       setCloud(cfg);
       toast(mode === 'owner' ? '내 저장소에 연결했습니다' : `${cfg.className || '수업'}에 참여했습니다`);
       return cfg;
@@ -101,7 +101,12 @@ export async function cloudPanel(app, lib) {
     if (await connectDialog()) await runSync(lib);
     return;
   }
+  if (cfg.mode === 'owner') {
+    // Code.gs에 반을 더했을 수 있으니 반 목록을 새로 받는다
+    try { cfg.classes = (await ping(cfg)).classes || []; setCloud(cfg); } catch { /* 목록에서 오류를 보여 준다 */ }
+  }
   const list = h('div', { class: 'remote-list' }, h('div', { class: 'muted' }, '목록을 불러오는 중…'));
+  const filter = h('select', { class: 'input class-filter hidden', 'aria-label': '반 고르기' });
   const copyBtn = (label, text) => h('button', {
     class: 'btn', onclick: async () => {
       try { await navigator.clipboard.writeText(text); toast('링크를 복사했습니다'); } catch { await dialog({ title: label, body: h('textarea', { class: 'input link-box', readonly: true }, text) }); }
@@ -118,7 +123,7 @@ export async function cloudPanel(app, lib) {
           : '내 노트가 선생님께 제출됩니다. 제출하지 않을 노트는 노트 메뉴에서 “선생님께 제출”을 끄세요.'))),
     h('div', { class: 'btn-row' },
       h('button', { class: 'btn primary', onclick: () => { closeFn?.(); runSync(lib); } }, '지금 동기화'),
-      cfg.mode === 'owner' && cfg.classCode ? copyBtn('학생 초대 링크 복사', inviteLink(cfg)) : null,
+      ...(cfg.mode === 'owner' ? (cfg.classes || []).map((c) => copyBtn(`${c.name} 초대 링크`, inviteLink(cfg, c.code))) : []),
       cfg.mode === 'student' ? copyBtn('다른 기기에서 이어 쓰기 링크', deviceLink(cfg)) : null,
       h('button', {
         class: 'btn', onclick: async () => {
@@ -128,34 +133,47 @@ export async function cloudPanel(app, lib) {
         },
       }, '연결 끊기')),
     h('label', { class: 'field-label' }, cfg.mode === 'owner' ? '클라우드에 있는 노트' : '내가 제출한 노트'),
+    filter,
     list);
   const p = dialog({ title: '클라우드', body, buttons: [{ label: '닫기', value: null }] });
   closeFn = () => document.querySelector('.dialog-back')?.remove();
   try {
-    const notes = (await listRemote()).sort((a, b) => (a.mine === b.mine ? 0 : a.mine ? -1 : 1) || String(a.name).localeCompare(String(b.name), 'ko') || b.updatedAt - a.updatedAt);
-    list.innerHTML = '';
-    if (!notes.length) list.append(h('div', { class: 'muted' }, '아직 올라간 노트가 없습니다.'));
-    let lastGroup = null;
-    for (const n of notes) {
-      const group = n.mine ? '내 노트' : n.name;
-      if (cfg.mode === 'owner' && group !== lastGroup) {
-        list.append(h('div', { class: 'remote-group' }, group));
-        lastGroup = group;
-      }
-      list.append(h('div', { class: 'remote-row' },
-        h('div', { class: 'remote-text' },
-          h('div', { class: 'strong ellipsis' }, n.title),
-          h('div', { class: 'muted small' }, `${formatDate(n.updatedAt)} · ${n.pages}쪽`)),
-        h('button', { class: 'btn small', onclick: () => { closeFn(); openRemoteNote(app, n); } }, '열기'),
-        n.pdf ? h('a', { class: 'btn small', href: n.pdf, target: '_blank', rel: 'noopener' }, 'PDF') : null,
-        cfg.mode === 'owner' || n.mine ? h('button', {
-          class: 'mini-btn', 'aria-label': '클라우드에서 삭제', html: icons.trash, onclick: async (e) => {
-            const row = e.currentTarget.closest('.remote-row');
-            if (!window.confirm(`클라우드에서 “${n.title}” 노트를 지울까요? 드라이브의 파일도 휴지통으로 갑니다.`)) return;
-            try { await removeRemote(n.id); row.remove(); toast('클라우드에서 지웠습니다'); } catch (err) { toast(err.message, 4000); }
-          },
-        }) : null));
+    const ko = (a, b) => String(a || '').localeCompare(String(b || ''), 'ko', { numeric: true });
+    const all = (await listRemote()).sort((a, b) => (a.mine === b.mine ? 0 : a.mine ? -1 : 1)
+      || ko(a.cls, b.cls) || ko(a.name, b.name) || b.updatedAt - a.updatedAt);
+    const classes = [...new Set(all.filter((n) => !n.mine && n.cls).map((n) => n.cls))];
+    if (cfg.mode === 'owner' && classes.length > 1) {
+      filter.classList.remove('hidden');
+      filter.append(h('option', { value: '' }, '모든 반'), ...classes.map((c) => h('option', { value: c }, c)));
+      filter.addEventListener('change', () => renderList());
     }
+    const renderList = () => {
+      const notes = filter.value ? all.filter((n) => n.cls === filter.value) : all;
+      list.innerHTML = '';
+      if (!notes.length) list.append(h('div', { class: 'muted' }, '아직 올라간 노트가 없습니다.'));
+      let lastGroup = null;
+      for (const n of notes) {
+        const group = n.mine ? '내 노트' : [n.cls, n.name].filter(Boolean).join(' · ');
+        if (cfg.mode === 'owner' && group !== lastGroup) {
+          list.append(h('div', { class: 'remote-group' }, group));
+          lastGroup = group;
+        }
+        list.append(h('div', { class: 'remote-row' },
+          h('div', { class: 'remote-text' },
+            h('div', { class: 'strong ellipsis' }, n.title),
+            h('div', { class: 'muted small' }, `${formatDate(n.updatedAt)} · ${n.pages}쪽`)),
+          h('button', { class: 'btn small', onclick: () => { closeFn(); openRemoteNote(app, n); } }, '열기'),
+          n.pdf ? h('a', { class: 'btn small', href: n.pdf, target: '_blank', rel: 'noopener' }, 'PDF') : null,
+          cfg.mode === 'owner' || n.mine ? h('button', {
+            class: 'mini-btn', 'aria-label': '클라우드에서 삭제', html: icons.trash, onclick: async (e) => {
+              const row = e.currentTarget.closest('.remote-row');
+              if (!window.confirm(`클라우드에서 “${n.title}” 노트를 지울까요? 드라이브의 파일도 휴지통으로 갑니다.`)) return;
+              try { await removeRemote(n.id); row.remove(); toast('클라우드에서 지웠습니다'); } catch (err) { toast(err.message, 4000); }
+            },
+          }) : null));
+      }
+    };
+    renderList();
   } catch (e) {
     list.innerHTML = '';
     list.append(h('div', { class: 'error-text' }, e.message));
@@ -187,7 +205,7 @@ export async function searchHandwriting(app, q, container) {
   }
   const terms = q.split(/\s+/).filter(Boolean);
   for (const r of results) {
-    const who = cfg?.mode === 'owner' && !r.mine ? `${r.name} · ` : '';
+    const who = cfg?.mode === 'owner' && !r.mine ? `${[r.cls, r.name].filter(Boolean).join(' ')} · ` : '';
     container.append(h('button', {
       class: 'result-row',
       onclick: () => openRemoteNote(app, { id: r.id, title: r.title, name: r.name, mine: r.mine, updatedAt: 0 }, r.pageId),

@@ -662,3 +662,4 @@ a.btn { text-decoration: none; color: inherit; }
 @media (hover: hover) { .result-row:hover { background: var(--surface-2); } }
 .snippet { color: var(--muted); font-size: 14px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .snippet mark { background: #ffe066; color: #1c1c1e; border-radius: 3px; padding: 0 2px; }
+.class-filter { margin-bottom: 8px; }
