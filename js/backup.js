@@ -33,16 +33,17 @@ export async function exportBackup(nb, pages) {
   return new Blob([JSON.stringify(data)], { type: 'application/json' });
 }
 
-export async function importBackup(file) {
-  const data = JSON.parse(await file.text());
+// keepIds: 클라우드 동기화처럼 같은 노트를 덮어쓸 때는 원래 ID를 그대로 쓴다
+export async function importBackup(file, { keepIds = false } = {}) {
+  const data = JSON.parse(typeof file === 'string' ? file : await file.text());
   if (data.format !== FORMAT || !data.notebook || !Array.isArray(data.pages)) {
     throw new Error('노트 백업 파일이 아닙니다.');
   }
-  const nbId = uid();
+  const nbId = keepIds ? data.notebook.id : uid();
   const idMap = new Map();
   const pages = [];
   for (const p of data.pages) {
-    const id = uid();
+    const id = keepIds ? p.id : uid();
     idMap.set(p.id, id);
     pages.push({
       ...p,
@@ -59,5 +60,11 @@ export async function importBackup(file) {
     pageIds: order.length === pages.length ? order : pages.map((p) => p.id),
     updatedAt: Date.now(),
   };
+  if (!keepIds) {
+    // 파일로 가져온 노트는 새 노트로 다룬다
+    delete nb.syncedAt;
+    delete nb.remoteId;
+    delete nb.cloud;
+  }
   return { nb, pages };
 }

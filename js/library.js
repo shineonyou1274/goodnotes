@@ -5,6 +5,8 @@ import { newNotebook, newPage, uid, COVER_COLORS, TEMPLATES, PAPER_COLORS, PAGE_
 import { pdfToPages, exportPdf } from './pdf.js';
 import { exportBackup, importBackup } from './backup.js';
 import { templatePreview } from './editor.js';
+import { getCloud, shouldSync, needsSync, removeRemote, rememberDeleted } from './cloud.js';
+import { connectDialog, cloudPanel, runSync, searchHandwriting } from './cloud-ui.js';
 import {
   h, toast, progress, dialog, confirmDialog, promptDialog, menu, pickFile, saveFile, safeFileName, formatDate,
 } from './util.js';
@@ -17,25 +19,55 @@ export class Library {
 
   async mount(container) {
     this.el = h('div', { class: 'library' });
-    this.search = h('input', { class: 'search', type: 'search', placeholder: '노트 찾기', 'aria-label': '노트 찾기' });
+    this.search = h('input', { class: 'search', type: 'search', placeholder: '노트 찾기', 'aria-label': '노트 찾기', enterkeyhint: 'search' });
     this.search.addEventListener('input', () => { this.query = this.search.value.trim().toLowerCase(); this.renderGrid(); });
+    // 클라우드에 연결돼 있으면 Enter로 손글씨까지 찾는다
+    this.search.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const q = this.search.value.trim();
+      if (!q) return;
+      if (!getCloud()) { toast('손글씨 검색은 클라우드에 연결하면 쓸 수 있습니다 (오른쪽 위 구름 버튼)', 3500); return; }
+      this.search.blur();
+      searchHandwriting(this.app, q, this.results);
+    });
+    this.cloudBtn = h('button', { class: 'icon-btn cloud-btn', title: '클라우드', 'aria-label': '클라우드', html: icons.cloud, onclick: () => cloudPanel(this.app, this) });
     const header = h('header', { class: 'lib-header' },
       h('h1', {}, '노트'),
       h('div', { class: 'spacer' }),
       h('label', { class: 'search-wrap' }, h('span', { html: icons.search }), this.search),
+      this.cloudBtn,
       h('button', { class: 'btn', onclick: (e) => this.importMenu(e.currentTarget) }, h('span', { html: icons.upload }), h('span', { class: 'hide-sm' }, '가져오기')),
       h('button', { class: 'btn primary', onclick: () => this.createDialog() }, h('span', { html: icons.plus }), h('span', {}, '새 노트')));
+    this.results = h('section', { class: 'search-results hidden' });
     this.grid = h('main', { class: 'grid' });
-    this.el.append(header, this.grid);
+    this.el.append(header, this.results, this.grid);
     container.append(this.el);
     await this.load();
+    if (this.app.pendingJoin) {
+      const j = this.app.pendingJoin;
+      this.app.pendingJoin = null;
+      if (await connectDialog(j)) await runSync(this);
+    }
   }
 
   destroy() { this.el?.remove(); }
 
   async load() {
+    if (!this.el) return;
     this.notebooks = (await db.getAllNotebooks()).sort((a, b) => b.updatedAt - a.updatedAt);
+    this.cloudBtn.classList.toggle('connected', !!getCloud());
     this.renderGrid();
+  }
+
+  syncLabel(nb) {
+    const cfg = getCloud();
+    if (!cfg) return null;
+    if (nb.remoteId) return h('span', { class: 'badge student' }, nb.remoteName || '학생');
+    if (!shouldSync(nb, cfg)) return null;
+    return needsSync(nb, cfg)
+      ? h('span', { class: 'badge wait', title: '아직 올리지 않은 변경이 있습니다' }, '올릴 것 있음')
+      : h('span', { class: 'badge ok', title: '클라우드에 저장됨' }, cfg.mode === 'student' ? '제출됨' : '저장됨');
   }
 
   renderGrid() {
@@ -51,7 +83,7 @@ export class Library {
       g.append(h('div', { class: 'card' },
         h('button', { class: 'card-open', onclick: () => this.app.openNotebook(nb.id), 'aria-label': `${nb.title} 열기` }, cover),
         h('div', { class: 'card-info' },
-          h('div', { class: 'card-text' }, h('div', { class: 'card-title' }, nb.title), h('div', { class: 'card-date' }, formatDate(nb.updatedAt))),
+          h('div', { class: 'card-text' }, h('div', { class: 'card-title' }, nb.title), h('div', { class: 'card-date' }, formatDate(nb.updatedAt), this.syncLabel(nb))),
           h('button', { class: 'mini-btn', 'aria-label': '노트 메뉴', html: icons.more, onclick: (e) => this.cardMenu(e.currentTarget, nb) }))));
     }
     if (!this.notebooks.length) {
@@ -76,9 +108,30 @@ export class Library {
       '-',
       { label: 'PDF로 내보내기', icon: icons.pdf, action: () => this.exportPdf(nb) },
       { label: '백업 파일로 내보내기', icon: icons.download, action: () => this.exportBackup(nb) },
+      ...this.cloudMenuItems(nb),
       '-',
       { label: '삭제', icon: icons.trash, danger: true, action: () => this.remove(nb) },
     ]);
+  }
+
+  cloudMenuItems(nb) {
+    const cfg = getCloud();
+    if (!cfg || nb.remoteId) return [];
+    const on = shouldSync(nb, cfg);
+    const label = cfg.mode === 'student' ? '선생님께 제출' : '클라우드에 저장';
+    return ['-', {
+      label, icon: icons.cloud, checked: on,
+      action: async () => {
+        const fresh = await db.getNotebook(nb.id);
+        fresh.cloud = !on;
+        await db.putNotebook(fresh);
+        if (!on) await runSync(this);
+        else {
+          toast(cfg.mode === 'student' ? '이제 이 노트는 올리지 않습니다 (이미 제출한 것은 남아 있습니다)' : '이 노트는 클라우드에 올리지 않습니다');
+          await this.load();
+        }
+      },
+    }];
   }
 
   async createDialog() {
@@ -194,6 +247,7 @@ export class Library {
   async duplicate(nb) {
     const pages = await this.loadFull(nb);
     const copy = { ...nb, id: uid(), title: nb.title + ' 사본', createdAt: Date.now(), updatedAt: Date.now() };
+    delete copy.syncedAt;
     const newPages = pages.map((p) => ({ ...p, id: uid(), notebookId: copy.id }));
     copy.pageIds = newPages.map((p) => p.id);
     await db.putNotebookWithPages(copy, newPages);
@@ -229,8 +283,31 @@ export class Library {
   }
 
   async remove(nb) {
-    const ok = await confirmDialog('노트 삭제', `“${nb.title}” 노트를 지울까요? 되돌릴 수 없습니다.`);
-    if (!ok) return;
+    const cfg = getCloud();
+    const inCloud = cfg && !nb.remoteId && nb.syncedAt;
+    let choice;
+    if (inCloud) {
+      choice = await dialog({
+        title: '노트 삭제',
+        body: `“${nb.title}” 노트를 지울까요? 되돌릴 수 없습니다.`,
+        buttons: [
+          { label: '취소', value: null },
+          { label: '이 기기에서만', value: 'local' },
+          { label: '클라우드에서도', value: 'all', danger: true },
+        ],
+      });
+      if (!choice) return;
+    } else {
+      if (!(await confirmDialog('노트 삭제', `“${nb.title}” 노트를 지울까요? 되돌릴 수 없습니다.`))) return;
+      choice = 'local';
+    }
+    if (inCloud) {
+      // 동기화할 때 다시 내려받지 않도록 기억해 둔다
+      rememberDeleted(nb.id);
+      if (choice === 'all') {
+        try { await removeRemote(nb.id); } catch (e) { toast('클라우드에서 지우지 못했습니다: ' + e.message, 4000); }
+      }
+    }
     await db.deleteNotebook(nb.id);
     await this.load();
   }

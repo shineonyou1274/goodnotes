@@ -35,5 +35,6 @@ export const icons = {
   edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>'),
   up: svg('<path d="M18 15l-6-6-6 6"/>'),
   down: svg('<path d="M6 9l6 6 6-6"/>'),
+  cloud: svg('<path d="M7 18a4.5 4.5 0 01-.6-8.96A6 6 0 0118 8.5a4.25 4.25 0 01-.5 9.5z"/>'),
   notebook: svg('<path d="M6 3h11a2 2 0 012 2v14a2 2 0 01-2 2H6z"/><path d="M6 3v18M4 7h4M4 12h4M4 17h4"/>'),
 };

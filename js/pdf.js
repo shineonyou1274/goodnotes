@@ -60,7 +60,7 @@ export async function pdfToPages(file, notebookId, onProgress = () => {}) {
 /* ---------- PDF 내보내기 ---------- */
 const enc = new TextEncoder();
 
-export async function exportPdf(pages, onProgress = () => {}) {
+export async function exportPdf(pages, onProgress = () => {}, { maxScale = 2.5, quality = 0.9 } = {}) {
   const chunks = [];
   let offset = 0;
   const offsets = [];
@@ -80,12 +80,12 @@ export async function exportPdf(pages, onProgress = () => {}) {
 
   const canvas = document.createElement('canvas');
   for (let i = 0; i < n; i++) {
-    onProgress(i + 1, n);
+    onProgress?.(i + 1, n);
     const page = pages[i];
     await ensurePageImages(page);
-    const scale = Math.min(2.5, 3000 / Math.max(page.w, page.h));
+    const scale = Math.min(maxScale, 3000 / Math.max(page.w, page.h));
     renderPageCanvas(page, scale, canvas);
-    const jpeg = new Uint8Array(await (await canvasToBlob(canvas, 'image/jpeg', 0.9)).arrayBuffer());
+    const jpeg = new Uint8Array(await (await canvasToBlob(canvas, 'image/jpeg', quality)).arrayBuffer());
     const W = (page.w * 0.75).toFixed(2), H = (page.h * 0.75).toFixed(2);
     const pageObj = 3 + i * 3, contObj = pageObj + 1, imgObj = pageObj + 2;
     startObj(pageObj);

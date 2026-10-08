@@ -44,6 +44,7 @@ export class Editor {
     const top = h('header', { class: 'topbar' },
       this._iconBtn(icons.back, '노트 목록', () => this.app.goLibrary()),
       this.titleBtn,
+      this.nb.remoteId ? h('span', { class: 'badge student' }, this.nb.remoteName || '학생') : null,
       h('div', { class: 'spacer' }),
       this.undoBtn, this.redoBtn,
       h('div', { class: 'sep' }),
@@ -292,6 +293,7 @@ export class Editor {
     page.updatedAt = Date.now();
     this.dirty.add(page);
     this.nbDirty = true;
+    this.contentChanged = true;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.flush(), 700);
     if (this.panelOpen) {
@@ -309,8 +311,16 @@ export class Editor {
     try {
       if (pages.length) await db.putPages(pages);
       if (nbChanged || pages.length) {
-        this.nb.updatedAt = Date.now();
+        // 내용이 바뀐 때만 '수정 시각'을 바꾼다 (그래야 클라우드에 다시 올릴 노트를 알 수 있다)
+        if (this.contentChanged || pages.length) this.nb.updatedAt = Date.now();
+        this.contentChanged = false;
         this.nb.pageIds = this.pages.map((p) => p.id);
+        // 그사이 클라우드 동기화가 적어 둔 값은 지우지 않는다
+        const cur = await db.getNotebook(this.nb.id);
+        if (cur) {
+          this.nb.syncedAt = cur.syncedAt;
+          if ('cloud' in cur) this.nb.cloud = cur.cloud;
+        }
         await db.putNotebook(this.nb);
       }
     } catch (err) {
@@ -349,6 +359,7 @@ export class Editor {
   pagesChanged(scrollTo) {
     this.nb.pageIds = this.pages.map((p) => p.id);
     this.nbDirty = true;
+    this.contentChanged = true;
     this.view.setPages(this.pages);
     if (scrollTo !== undefined) {
       this.view.currentIndex = scrollTo;
@@ -599,6 +610,7 @@ export class Editor {
     this.nb.title = name;
     this.titleBtn.textContent = name;
     this.nbDirty = true;
+    this.contentChanged = true;
     this.flush();
   }
 

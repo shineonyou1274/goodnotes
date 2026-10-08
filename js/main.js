@@ -4,6 +4,7 @@ import { Library } from './library.js';
 import { Editor } from './editor.js';
 import { loadSettings } from './settings.js';
 import { toast } from './util.js';
+import { getCloud, needsSync, uploadNotebook } from './cloud.js';
 
 const root = document.getElementById('app');
 
@@ -27,11 +28,40 @@ async function closeScreen() {
   const s = app.screen;
   app.screen = null;
   if (!s) return;
-  if (s instanceof Editor) await s.close();
-  else s.destroy();
+  if (s instanceof Editor) {
+    await s.close();
+    backgroundSync(s.nb.id);
+  } else s.destroy();
+}
+
+// 노트를 닫으면 바뀐 내용을 클라우드에 조용히 올린다
+function backgroundSync(id) {
+  if (!getCloud()) return;
+  app.syncing = (app.syncing || Promise.resolve()).then(async () => {
+    const nb = await db.getNotebook(id);
+    if (!nb || !needsSync(nb)) return;
+    try {
+      await uploadNotebook(id);
+      toast(`“${nb.title}” 클라우드에 저장했습니다`);
+    } catch (e) {
+      console.error(e);
+      toast('클라우드에 올리지 못했습니다. 나중에 “동기화”를 눌러 주세요.', 3500);
+    }
+    if (app.screen instanceof Library) app.screen.load();
+  });
 }
 
 async function show() {
+  // 초대 링크: #/join?u=웹앱주소&c=수업코드(&n=이름&t=기기코드)
+  const j = location.hash.match(/^#\/join\?(.*)$/);
+  if (j) {
+    const q = new URLSearchParams(j[1]);
+    app.pendingJoin = {
+      mode: q.get('c') ? 'student' : 'owner',
+      url: q.get('u') || '', classCode: q.get('c') || '', name: q.get('n') || '', token: q.get('t') || undefined,
+    };
+    history.replaceState(null, '', location.pathname + location.search + '#/');
+  }
   await closeScreen();
   const m = location.hash.match(/^#\/note\/([\w-]+)/);
   if (m) {

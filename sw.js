@@ -1,5 +1,5 @@
 // 오프라인에서도 앱이 열리도록 파일을 저장해 둔다
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `goodnotes-web-${VERSION}`;
 const SHELL = [
   './',
@@ -19,6 +19,9 @@ const SHELL = [
   './js/util.js',
   './js/icons.js',
   './js/settings.js',
+  './js/cloud.js',
+  './js/cloud-ui.js',
+  './setup.html',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/apple-touch-icon.png',

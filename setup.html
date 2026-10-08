@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>클라우드 설치 안내</title>
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    html, body { height: auto; }
+    body { position: static; overflow: auto; -webkit-user-select: text; user-select: text; }
+    main { max-width: 760px; margin: 0 auto; padding: calc(24px + var(--safe-top)) 20px 60px; line-height: 1.65; }
+    h1 { font-size: 26px; margin: 0 0 6px; }
+    h2 { font-size: 19px; margin: 34px 0 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+    ol { padding-left: 22px; }
+    li { margin: 8px 0; }
+    code, kbd { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-size: 14px; }
+    .box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
+    .warn { border-color: #f2c94c; background: rgba(242, 201, 76, 0.12); }
+    .code-wrap { position: relative; }
+    pre { background: #1e1e22; color: #e8e8ee; border-radius: var(--radius); padding: 16px; max-height: 360px; overflow: auto; font-size: 12.5px; line-height: 1.5; }
+    .copy { position: absolute; top: 10px; right: 10px; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--surface-2); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <a href="./">← 노트 앱으로</a>
+  <h1>클라우드(구글 시트·드라이브) 연결 안내</h1>
+  <p class="muted">노트를 내 구글 드라이브에 저장하고, 손글씨를 검색하고, 학생 노트를 모아 보는 기능입니다. 처음 한 번만 10분 정도 설정하면 됩니다.</p>
+
+  <div class="box">
+    <table>
+      <tr><th></th><th>혼자 쓰기 (A)</th><th>수업에서 쓰기 (B)</th></tr>
+      <tr><td>누가 설정하나요?</td><td>나</td><td>선생님 한 명 (학생은 링크만 열면 됨)</td></tr>
+      <tr><td>무엇이 되나요?</td><td>여러 기기에서 같은 노트, 손글씨 검색</td><td>A의 기능 + 학생 노트를 시트와 PDF로 모아 보기</td></tr>
+      <tr><td>Code.gs 설정</td><td><code>OWNER_KEY</code>만 바꾸기</td><td><code>OWNER_KEY</code>, <code>CLASS_CODE</code>, <code>CLASS_NAME</code> 바꾸기</td></tr>
+    </table>
+  </div>
+
+  <h2>1. 구글 시트와 Apps Script 만들기</h2>
+  <ol>
+    <li><a href="https://sheets.new" target="_blank" rel="noopener">새 구글 시트</a>를 만들고 이름을 <b>노트 앱 저장소</b>로 바꿉니다.</li>
+    <li>시트 위쪽 메뉴에서 <b>확장 프로그램 → Apps Script</b>를 누릅니다.</li>
+    <li>열린 편집기의 <code>Code.gs</code>에 있는 내용을 모두 지우고, 아래 코드를 복사해 붙여 넣습니다.</li>
+  </ol>
+  <div class="code-wrap">
+    <button class="btn primary copy" id="copy">코드 복사</button>
+    <pre id="code">코드를 불러오는 중…</pre>
+  </div>
+
+  <h2>2. 비밀번호와 수업 코드 정하기</h2>
+  <p>붙여 넣은 코드 맨 위의 세 줄을 바꿉니다.</p>
+  <ul>
+    <li><code>OWNER_KEY</code>: 나만 아는 관리자 비밀번호 (8자 이상). <b>학생에게 알려 주면 안 됩니다.</b></li>
+    <li><code>CLASS_CODE</code>: 학생에게 알려 줄 수업 코드 (예: <code>suhak-2-3</code>). 혼자 쓸 때는 <code>''</code> 그대로 둡니다.</li>
+    <li><code>CLASS_NAME</code>: 학생 화면에 보일 수업 이름 (예: <code>'2학년 3반 수학'</code>)</li>
+  </ul>
+  <p><kbd>Ctrl/⌘ + S</kbd>로 저장합니다.</p>
+
+  <h2>3. 글자 인식(OCR) 켜기</h2>
+  <ol>
+    <li>편집기 왼쪽의 <b>서비스</b> 옆 <b>+</b>를 누릅니다.</li>
+    <li>목록에서 <b>Drive API</b>를 고르고 <b>추가</b>를 누릅니다.</li>
+    <li>편집기 위쪽 함수 목록에서 <b>설치확인</b>을 고르고 <b>실행</b>을 누릅니다.</li>
+    <li>권한 승인 창이 뜨면 내 계정을 고릅니다. "Google에서 확인하지 않은 앱" 화면이 나오면 <b>고급 → (안전하지 않은 페이지로) 이동</b>을 누르고 <b>허용</b>합니다. 내가 만든 스크립트가 내 드라이브와 시트를 쓰겠다는 뜻입니다.</li>
+    <li>아래 실행 로그에 <b>준비 완료!</b>가 나오면 성공입니다. 시트에 <b>노트</b>, <b>페이지 글자</b> 탭이 생깁니다.</li>
+  </ol>
+
+  <h2>4. 웹 앱으로 배포하기</h2>
+  <ol>
+    <li>오른쪽 위 <b>배포 → 새 배포</b>를 누릅니다.</li>
+    <li>톱니바퀴(유형 선택)에서 <b>웹 앱</b>을 고릅니다.</li>
+    <li><b>다음 사용자 인증 정보로 실행: 나</b>, <b>액세스 권한이 있는 사용자: 모든 사용자</b>로 정하고 <b>배포</b>를 누릅니다.</li>
+    <li>나오는 <b>웹 앱 URL</b>(<code>https://script.google.com/macros/s/…/exec</code>)을 복사합니다.</li>
+  </ol>
+  <div class="box warn">“모든 사용자”로 해야 태블릿 앱이 주소에 접속할 수 있습니다. 대신 비밀번호(<code>OWNER_KEY</code>)나 수업 코드가 없으면 아무것도 볼 수 없고, 학생은 자기 노트만 볼 수 있습니다.</div>
+
+  <h2>5. 노트 앱에 연결하기</h2>
+  <ol>
+    <li>노트 앱 첫 화면 오른쪽 위의 <b>구름 버튼</b>을 누릅니다.</li>
+    <li><b>내 저장소 (관리자)</b>를 고르고, 웹 앱 주소와 관리자 비밀번호를 넣고 <b>연결</b>합니다.</li>
+    <li>다른 기기(아이패드, 갤럭시 탭, PC)에서도 똑같이 연결하면 노트가 서로 맞춰집니다.</li>
+  </ol>
+
+  <h2>6. (수업) 학생 초대와 노트 보기</h2>
+  <ol>
+    <li>구름 버튼 → <b>학생 초대 링크 복사</b>를 눌러 학생들에게 보냅니다 (클래스룸, 메신저 등).</li>
+    <li>학생은 링크를 열고 <b>이름(학번과 함께)</b>만 넣으면 됩니다. 학생이 쓴 노트는 닫을 때마다 자동으로 제출됩니다.</li>
+    <li>학생 노트를 보는 방법은 세 가지입니다.
+      <ul>
+        <li><b>구글 시트 “노트” 탭</b>: 학생 이름, 노트 제목, 수정 시각, <b>PDF 링크</b>, 손글씨를 읽은 글자가 한 줄씩 적힙니다.</li>
+        <li><b>구글 드라이브 “노트 앱 저장소/PDF/학생 이름”</b> 폴더: 학생별 PDF</li>
+        <li><b>노트 앱의 구름 버튼</b>: 학생별 목록에서 <b>열기</b>를 누르면 내 기기에 사본으로 받아 펜으로 보고 표시할 수 있습니다.</li>
+      </ul>
+    </li>
+    <li>노트 앱 검색창에 낱말을 쓰고 <kbd>Enter</kbd>를 누르면 모든 학생의 손글씨에서 찾습니다.</li>
+  </ol>
+  <div class="box">
+    학생이 기기를 바꾸면 처음 기기의 구름 버튼 → <b>다른 기기에서 이어 쓰기 링크</b>를 새 기기에서 열면 됩니다. 이 링크가 없으면 같은 이름이라도 다른 학생으로 다뤄서 예전 노트를 받을 수 없습니다 (다른 학생이 이름만 바꿔 남의 노트를 보지 못하게 하려는 것입니다).
+  </div>
+
+  <h2>알아 두기</h2>
+  <ul>
+    <li>손글씨 인식은 구글 드라이브의 무료 글자 인식을 씁니다. 또박또박 쓴 글씨는 잘 읽고, 휘갈긴 글씨나 수식은 틀릴 수 있습니다.</li>
+    <li>노트를 닫거나 <b>지금 동기화</b>를 누를 때 올라갑니다. 방금 쓴 내용은 올라간 뒤에 검색됩니다.</li>
+    <li>코드를 고쳤다면 <b>배포 → 배포 관리 → 연필(수정) → 버전: 새 버전 → 배포</b>를 해야 반영됩니다. 이렇게 하면 웹 앱 주소는 그대로입니다.</li>
+    <li>학생 개인정보(이름·손글씨)가 선생님의 구글 드라이브에 저장됩니다. 학교의 개인정보 지침을 확인하고, 이름 대신 번호만 쓰게 해도 됩니다.</li>
+    <li>구글 무료 계정의 Apps Script는 한 번 실행에 6분까지만 쓸 수 있습니다. 쪽수가 아주 많은 PDF는 손글씨 읽기가 여러 번에 나눠 진행됩니다.</li>
+  </ul>
+</main>
+<script>
+  fetch('apps-script/Code.gs').then((r) => r.text()).then((t) => { document.getElementById('code').textContent = t; });
+  document.getElementById('copy').addEventListener('click', async (e) => {
+    const t = document.getElementById('code').textContent;
+    try { await navigator.clipboard.writeText(t); e.target.textContent = '복사했습니다'; }
+    catch { const r = document.createRange(); r.selectNodeContents(document.getElementById('code')); getSelection().removeAllRanges(); getSelection().addRange(r); e.target.textContent = '선택됨 — 복사하세요'; }
+    setTimeout(() => { e.target.textContent = '코드 복사'; }, 2000);
+  });
+</script>
+</body>
+</html>
