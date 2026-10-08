@@ -23,16 +23,20 @@ export async function connectDialog(prefill = {}) {
   const body = h('div', { class: 'form' });
   const draw = () => {
     body.innerHTML = '';
-    body.append(
+    const parts = [
       h('div', { class: 'seg seg-wide' },
         h('button', { class: `seg-btn ${mode === 'owner' ? 'active' : ''}`, onclick: () => { mode = 'owner'; draw(); } }, '내 저장소 (관리자)'),
         h('button', { class: `seg-btn ${mode === 'student' ? 'active' : ''}`, onclick: () => { mode = 'student'; draw(); } }, '수업 참여 (학생)')),
       h('p', { class: 'muted small' }, mode === 'owner'
         ? '내 구글 시트·드라이브에 노트를 저장합니다. 여러 기기에서 같은 노트를 쓰고, 손글씨를 검색할 수 있습니다. 수업 코드를 정했다면 학생들이 제출한 노트도 여기서 봅니다.'
         : '선생님의 저장소에 내 노트를 제출합니다. 내 노트는 나와 선생님만 볼 수 있습니다.'),
-      field('웹 앱 주소', url, mode === 'owner' ? h('a', { href: GUIDE_URL, target: '_blank', rel: 'noopener' }, '주소를 만드는 방법 보기') : null),
+      field('웹 앱 주소', url, h('span', {},
+        h('a', { href: '#', onclick: (e) => { e.preventDefault(); if (url.value.trim()) window.open(url.value.trim(), '_blank', 'noopener'); } }, '이 주소가 맞는지 새 탭에서 확인'),
+        mode === 'owner' ? ' · ' : null,
+        mode === 'owner' ? h('a', { href: GUIDE_URL, target: '_blank', rel: 'noopener' }, '주소를 만드는 방법 보기') : null)),
       mode === 'owner' ? field('관리자 비밀번호', key) : field('수업 코드', code),
-      mode === 'student' ? field('이름 (학번과 함께 쓰면 좋아요)', name) : null);
+      mode === 'student' ? field('이름 (학번과 함께 쓰면 좋아요)', name) : null];
+    body.append(...parts.filter(Boolean));
   };
   draw();
   for (;;) {
@@ -60,7 +64,7 @@ export async function connectDialog(prefill = {}) {
       return cfg;
     } catch (e) {
       progress(null);
-      toast(e.message, 4500);
+      toast(e.message, 9000);
     }
   }
 }

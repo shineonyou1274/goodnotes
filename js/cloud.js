@@ -49,11 +49,11 @@ async function call(action, body = {}, cfg = getCloud()) {
       body: JSON.stringify({ action, ...auth, ...body }),
     });
   } catch {
-    throw new Error('서버에 연결할 수 없습니다. 인터넷 연결과 웹 앱 주소를 확인하세요.');
+    throw new Error('서버에 연결하지 못했습니다. “이 주소가 맞는지 새 탭에서 확인”을 눌러 “노트 앱 서버가 동작 중입니다”가 보이는지 확인하세요. 안 보이면 Apps Script 배포 설정(웹 앱, 액세스 권한: 모든 사용자)을 확인하세요.');
   }
   let data;
   try { data = await res.json(); } catch {
-    throw new Error('서버 응답을 읽을 수 없습니다. 웹 앱 주소(…/exec)와 배포 설정(액세스 권한: 모든 사용자)을 확인하세요.');
+    throw new Error(`서버 응답을 읽을 수 없습니다 (${res.status}). “이 주소가 맞는지 새 탭에서 확인”을 눌러 보고, Apps Script 배포 설정(웹 앱, 액세스 권한: 모든 사용자)을 확인하세요.`);
   }
   if (!data.ok) throw new Error(data.error || '요청이 실패했습니다.');
   return data;
