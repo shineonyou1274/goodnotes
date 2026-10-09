@@ -8,7 +8,7 @@ import { renderPageCanvas, ensurePageImages } from './render.js';
 
 const KEY = 'goodnotes-web:cloud';
 const DELETED_KEY = 'goodnotes-web:cloud-deleted';
-const OCR_BATCH = 6;
+const OCR_BATCH = 3;
 
 export function getCloud() {
   try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { return null; }
@@ -70,10 +70,17 @@ export const aiWrite = (id, scores, memo) => call('aiWrite', { id, scores, memo 
 export const aiRubric = (title, answers) => call('aiRubric', { title, answers }).then((d) => d.rubric || []);
 export const aiQuestions = (opts) => call('aiQuestions', opts);
 
+// 어느 저장소·누구로 올렸는지 (한 기기에서 선생님↔학생으로 바꿔 연결해도 섞이지 않게)
+export function syncKey(cfg) {
+  if (!cfg) return '';
+  return cfg.mode === 'owner' ? `o:${cfg.url}` : `s:${cfg.url}|${cfg.classCode}|${cfg.token}`;
+}
+
 // 이 노트를 클라우드에 올릴지
 export function shouldSync(nb, cfg = getCloud()) {
   // 내려받은 학생 노트(사본)는 올리지 않는다. 노트 메뉴에서 끈 노트(cloud === false)도 올리지 않는다.
-  return !!cfg && !nb.remoteId && nb.cloud !== false;
+  // 다른 연결(예: 선생님으로 올렸던 노트를 학생으로 연결한 기기)에서 올린 노트도 올리지 않는다.
+  return !!cfg && !nb.remoteId && nb.cloud !== false && !nb.returnOf && (!nb.syncKey || nb.syncKey === syncKey(cfg));
 }
 
 export function needsSync(nb, cfg = getCloud()) {
@@ -96,10 +103,15 @@ function blobToBase64(blob) {
   });
 }
 
-async function pageImage(page) {
-  if (!page.items.length && !page.bg) return null; // 빈 페이지는 읽을 것이 없다
-  await ensurePageImages(page);
-  const c = renderPageCanvas(page, Math.min(2, 1400 / page.w));
+// 글자 인식용 그림: 손글씨와 글상자만 (사진·동영상은 읽지 않는다).
+// 과제 답안은 인쇄된 문제(배경)를 빼서 학생이 쓴 글씨만 읽는다.
+async function pageImage(page, { skipBg = false } = {}) {
+  const items = page.items.filter((it) => it.type === 'stroke' || it.type === 'text');
+  const bg = skipBg ? null : page.bg;
+  if (!items.length && !bg) return null; // 읽을 것이 없다
+  const p = { ...page, items, bg };
+  await ensurePageImages(p);
+  const c = renderPageCanvas(p, Math.min(2, 1400 / page.w));
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.82));
   c.width = c.height = 0;
   return blob ? blobToBase64(blob) : null;
@@ -130,32 +142,45 @@ async function doUpload(nbId, onProgress) {
     pdf,
   });
 
+  // 올리는 동안 노트가 바뀌었을 수 있으니 최신 기록에 '올린 버전'만 적는다
+  const cur = await db.getNotebook(nb.id);
+  if (cur) {
+    cur.syncedAt = version;
+    cur.syncKey = syncKey(getCloud());
+    await db.putNotebook(cur);
+  }
+  // 손글씨 읽기와 검사는 뒤에서 한다 (제출은 여기서 끝)
+  readHandwriting(nb.id);
+  return true;
+}
+
+// 손글씨 읽기(OCR)는 한 번에 하나씩, 화면을 막지 않고 뒤에서 한다
+let ocrQueue = Promise.resolve();
+export function readHandwriting(nbId) {
+  const run = ocrQueue.then(() => doOcr(nbId)).catch((e) => console.warn('손글씨 읽기 실패', e));
+  ocrQueue = run;
+  return run;
+}
+
+async function doOcr(nbId) {
+  const nb = await db.getNotebook(nbId);
+  if (!nb || !nb.syncedAt) return;
+  const pages = await loadPages(nb);
   const todo = pages.filter((p) => (p.ocrAt || 0) < (p.updatedAt || 1));
-  let doneCount = 0;
   for (let i = 0; i < todo.length; i += OCR_BATCH) {
     const batch = todo.slice(i, i + OCR_BATCH);
-    onProgress(`손글씨 읽는 중… ${doneCount} / ${todo.length}쪽`);
     const payload = [];
-    for (const p of batch) payload.push({ pageId: p.id, index: pages.indexOf(p), image: await pageImage(p) });
+    for (const p of batch) payload.push({ pageId: p.id, index: pages.indexOf(p), image: await pageImage(p, { skipBg: !!nb.taskId }) });
     const res = await call('ocr', { id: nb.id, pages: payload });
     const done = new Set(res.done || []);
     const now = Date.now();
     const changed = batch.filter((p) => done.has(p.id));
     changed.forEach((p) => { p.ocrAt = now; });
     if (changed.length) await db.putPages(changed);
-    doneCount += changed.length;
-    if (done.size < batch.length) break; // 서버 시간이 모자라면 다음 동기화 때 이어서 한다
+    if (done.size < batch.length) return; // 서버 시간이 모자라면 다음 동기화 때 이어서 한다
   }
-
-  // 올리는 동안 노트가 바뀌었을 수 있으니 최신 기록에 '올린 버전'만 적는다
-  const cur = await db.getNotebook(nb.id);
-  if (cur) {
-    cur.syncedAt = version;
-    await db.putNotebook(cur);
-  }
-  // 과제 답안이면 서버가 낱말·AI 검사를 한다 (기다리지 않는다)
-  if (nb.taskId) call('check', { id: nb.id }).catch((e) => console.warn('검사 실패', e));
-  return true;
+  // 과제 답안이면 서버가 낱말·AI 검사를 한다
+  if (nb.taskId) await call('check', { id: nb.id }).catch((e) => console.warn('검사 실패', e));
 }
 
 function canvasJpeg(c, q) {
@@ -188,12 +213,19 @@ export async function assignNotebook(nbId, { classes, due, keywords, rubric, cri
 }
 
 // 학생: 과제를 받아 내 노트로 만든다 (이미 있으면 그 노트)
-export async function startTask(task) {
-  const local = (await db.getAllNotebooks()).find((n) => n.taskId === task.id && !n.returnOf);
-  if (local) return local;
+// fresh: 선생님이 문제를 다시 냈을 때 새 문제지로 받는다 (전에 쓴 노트는 남는다)
+export async function startTask(task, { fresh = false } = {}) {
+  const local = (await db.getAllNotebooks()).find((n) => n.taskId === task.id && !n.returnOf && !n.taskOld);
+  if (local && !fresh) return local;
+  if (local) {
+    local.taskOld = true;
+    local.title = `${local.title} (예전 문제)`;
+    await db.putNotebook(local);
+  }
   const res = await call('getTask', { id: task.id });
   const { nb, pages } = await importBackup(res.data);
   nb.taskId = task.id;
+  nb.taskVersion = task.assignedAt || Date.now();
   nb.title = res.title || task.title;
   nb.createdAt = nb.updatedAt = Date.now();
   nb.syncedAt = 0;
@@ -243,6 +275,7 @@ export async function downloadNotebook(remote, { asCopy = false } = {}) {
     if (old) await db.deleteNotebook(nb.id);
     nb.updatedAt = res.updatedAt || nb.updatedAt;
     nb.syncedAt = nb.updatedAt;
+    nb.syncKey = syncKey(getCloud());
     nb.cloud = true;
     if (old) { nb.thumb = nb.thumb || old.thumb; nb.lastPage = old.lastPage; }
   }
@@ -290,6 +323,13 @@ export async function syncAll(onProgress = () => {}) {
   for (const nb of local) {
     if (!needsSync(nb, cfg)) continue;
     if (await uploadNotebook(nb.id, (m) => onProgress(`“${nb.title}” ${m}`))) pushed++;
+  }
+  // 지난번에 다 못 읽은 손글씨는 뒤에서 이어 읽는다
+  for (const nb of await db.getAllNotebooks()) {
+    if (shouldSync(nb, cfg) && nb.syncedAt && !needsSync(nb, cfg)) {
+      const pages = await db.getPages(nb.id);
+      if (pages.some((p) => (p.ocrAt || 0) < (p.updatedAt || 1))) readHandwriting(nb.id);
+    }
   }
   return { pulled, pushed };
 }

@@ -916,7 +916,8 @@ class EraseAction {
     let changed = false;
     const out = [];
     for (const it of page.items) {
-      if (it.type !== 'stroke') { out.push(it); continue; }
+      // 문제지의 줄·답 칸(locked)은 지우개로 지우지 않는다
+      if (it.type !== 'stroke' || it.locked) { out.push(it); continue; }
       if (this.mode === 'stroke') {
         if (strokeHitsCircle(it, l.x, l.y, r)) changed = true; else out.push(it);
       } else {

@@ -3,86 +3,201 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>클라우드 설치 안내</title>
+  <title>노트 앱 안내</title>
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/app.css">
   <style>
     html, body { height: auto; }
     body { position: static; overflow: auto; -webkit-user-select: text; user-select: text; }
-    main { max-width: 640px; margin: 0 auto; padding: calc(24px + var(--safe-top)) 20px 60px; line-height: 1.7; }
-    h1 { font-size: 24px; margin: 8px 0 4px; }
-    h2 { font-size: 18px; margin: 28px 0 8px; }
-    ol { padding-left: 22px; margin: 0; }
-    li { margin: 6px 0; }
-    b { color: var(--accent); }
-    code, kbd { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-size: 14px; }
-    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 18px; }
-    details { margin-top: 28px; }
-    summary { cursor: pointer; font-weight: 600; }
-    pre { background: #1e1e22; color: #e8e8ee; border-radius: var(--radius); padding: 14px; max-height: 300px; overflow: auto; font-size: 12px; }
+    main { max-width: 680px; margin: 0 auto; padding: calc(20px + var(--safe-top)) 16px 60px; line-height: 1.6; }
+    h1 { font-size: 24px; margin: 10px 0 14px; }
     a { color: var(--accent); }
-    .muted { font-size: 14px; }
-    .warn-card { margin-top: 10px; border-color: #f2c94c; background: rgba(242, 201, 76, 0.12); }
+    .tabs { display: flex; gap: 8px; position: sticky; top: 0; padding: 8px 0; background: var(--bg); z-index: 2; }
+    .tab { flex: 1; height: 52px; border-radius: 14px; font-size: 18px; font-weight: 700; background: var(--surface-2); color: var(--muted); }
+    .tab.on.t { background: #3a6df0; color: #fff; }
+    .tab.on.s { background: #14a39a; color: #fff; }
+    .pane { display: none; }
+    .pane.on { display: block; }
+    .item { display: flex; gap: 14px; padding: 16px; margin: 12px 0; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); }
+    .item .ic { font-size: 28px; line-height: 1; flex: none; width: 36px; text-align: center; }
+    .item h3 { margin: 0 0 6px; font-size: 17px; }
+    .item p { margin: 4px 0; }
+    .item.warn { border: 2px solid #e2574c; background: rgba(226, 87, 76, 0.07); }
+    .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+    .arrow { color: var(--muted); font-weight: 700; }
+    /* 화면 단추 흉내 */
+    .k { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 600; white-space: nowrap; border: 1px solid var(--line); background: var(--surface); color: inherit; }
+    .k.blue { background: #3a6df0; border-color: #3a6df0; color: #fff; }
+    .k.round { border-radius: 16px; }
+    .k.green { background: rgba(46, 164, 79, 0.14); border-color: transparent; color: #1f8a3e; }
+    .k.pink { color: #d9668f; }
+    .k.gs { background: #1a73e8; border-color: #1a73e8; color: #fff; border-radius: 4px; }
+    .k.box { border-radius: 4px; }
+    .k.no { position: relative; color: #e2574c; border-color: #e2574c; }
+    .k.no::after { content: ''; position: absolute; left: 6px; right: 6px; top: 50%; border-top: 2px solid #e2574c; transform: rotate(-8deg); }
+    .k.yes { border: 2px solid #2ea44f; }
+    .k.yellow { background: #fff6d6; border-color: #f2c94c; color: #1c1c1e; }
+    .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 10px; margin-left: 6px; vertical-align: 2px; }
+    .tag.red { background: #e2574c; color: #fff; }
+    .tag.gray { background: var(--surface-2); color: var(--muted); }
+    .card-mock { display: inline-block; width: 150px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); vertical-align: middle; }
+    .card-mock b { display: block; font-size: 14px; }
+    .card-mock span { font-size: 13px; font-weight: 600; }
+    .muted { color: var(--muted); font-size: 14px; }
+    details { margin-top: 24px; }
+    summary { cursor: pointer; font-weight: 600; }
+    pre { background: #1e1e22; color: #e8e8ee; border-radius: 12px; padding: 14px; max-height: 300px; overflow: auto; font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .k.green { color: #5fd17f; }
+      .k.yellow { color: #1c1c1e; }
+    }
   </style>
 </head>
 <body>
 <main>
   <a href="./">← 노트 앱으로</a>
-  <h1>클라우드 연결</h1>
-  <p class="muted">필기만 할 거면 필요 없습니다. 학생 노트를 모아 보거나 손글씨를 검색할 때만 하세요.</p>
-
-  <h2>선생님 (PC에서, 처음 한 번)</h2>
-  <div class="card">
-    <ol>
-      <li><a href="https://sheets.new" target="_blank" rel="noopener">새 구글 시트</a> → <b>확장 프로그램 → Apps Script</b></li>
-      <li>코드 칸 비우기(<kbd>Ctrl+A</kbd> → <kbd>Delete</kbd>) → <button class="btn primary" id="copy" style="height:32px">코드 복사</button> → 붙여 넣기 → <kbd>Ctrl+S</kbd></li>
-      <li><b>설치확인</b> 고르고 <b>실행</b> → <b>허용</b></li>
-      <li><b>배포 → 새 배포 → 웹 앱</b>, 액세스 <b>모든 사용자</b> → 배포 → <b>웹 앱 주소 복사</b></li>
-      <li>시트 <b>설정</b> 탭: 비밀번호를 <b>영문+숫자 8자 이상</b>으로 (예: <code>note2026ok</code>), 반 이름 적기</li>
-      <li>노트 앱 <b>구름 버튼</b> → <b>내 저장소</b> → 주소와 비밀번호 넣고 <b>연결</b>. <b>끝!</b></li>
-    </ol>
+  <h1>꼭 알아 둘 것</h1>
+  <div class="tabs">
+    <button class="tab t on" data-p="teacher">👩‍🏫 선생님</button>
+    <button class="tab s" data-p="student">🧑‍🎓 학생</button>
   </div>
-  <div class="card warn-card">⚠ <b>새 배포는 처음 한 번만.</b> 다시 하면 주소가 바뀌어 학생 링크가 끊깁니다.<br>코드를 바꿀 때는 <b>배포 관리 → ✏ → 새 버전</b>.</div>
 
-  <h2>학생에게 보내기</h2>
-  <div class="card">
-    구름 버튼의 <b>반별 초대 링크</b>를 복사해 보내세요. 학생은 링크 열고 이름 쓰고, 노트를 쓴 뒤 <b>제출하기</b>만 누르면 됩니다.
-  </div>
-  <p class="muted">학생 노트는 시트의 <b>노트</b> 탭(PDF 링크)이나 앱의 구름 버튼에서 봅니다.</p>
+  <!-- 선생님 -->
+  <section class="pane on" id="teacher">
+    <div class="item warn">
+      <div class="ic">🚫</div>
+      <div>
+        <h3>코드를 바꿀 때 “새 배포”는 누르지 마세요 <span class="tag red">가장 중요</span></h3>
+        <p>새 배포를 하면 주소가 바뀌어 <b>학생 링크가 모두 끊깁니다.</b></p>
+        <div class="flow"><span class="k gs">배포 ▾</span><span class="arrow">→</span><span class="k box no">새 배포</span><span class="muted">❌</span></div>
+        <div class="flow"><span class="k gs">배포 ▾</span><span class="arrow">→</span><span class="k box yes">배포 관리</span><span class="arrow">→</span><span class="k box">✏</span><span class="arrow">→</span><span class="k box">버전: <b>새 버전</b></span><span class="arrow">→</span><span class="k gs">배포</span><span class="muted">✅</span></div>
+        <p class="muted">새 배포는 맨 처음 설치할 때 한 번만 합니다 (웹 앱, 액세스 <b>모든 사용자</b>).</p>
+      </div>
+    </div>
 
-  <h2>과제 내주고 검사하기</h2>
-  <div class="card">
-    <ol>
-      <li>앱 첫 화면 <b>문제지 만들기</b> (PDF 활동지는 <b>가져오기</b>) → 위쪽 <b>과제로 내주기</b></li>
-      <li>학생은 맨 위 <b>받은 과제</b>를 눌러 쓰고 <b>제출하기</b></li>
-      <li>시트 <b>노트</b> 탭 <b>선생님 피드백</b> 칸에 쓰면 학생에게 갑니다. 앱에서 학생 노트를 열고 빨간 펜으로 고친 뒤 <b>돌려주기</b>도 됩니다.</li>
-      <li>루브릭(선택): 과제를 내줄 때 기준과 배점을 정하면, 돌려주기 창에서 점수를 누르고 피드백을 만듭니다.</li>
-      <li>AI 검사(선택): 시트 <b>AI 설정</b> 탭에 키 넣기. 받는 방법은 그 탭에 있습니다.</li>
-    </ol>
-  </div>
-  <p class="muted">이미 설치했다면: 새 코드를 붙여 넣고 <b>배포 관리 → ✏ → 새 버전</b>. 시트를 새로 고치면 탭이 생깁니다.</p>
+    <div class="item">
+      <div class="ic">🔑</div>
+      <div>
+        <h3>비밀번호는 영문 + 숫자 8자 이상</h3>
+        <p>시트 <b>설정</b> 탭의 노란 칸 <span class="k yellow">note2026ok</span> 처럼. <b>학생에게 알려 주지 마세요.</b></p>
+      </div>
+    </div>
 
-  <details>
-    <summary>연결이 안 될 때</summary>
-    <ul>
-      <li><b>“비밀번호를 … 바꿔 주세요”</b> → 설정 탭 비밀번호를 영문+숫자 8자 이상으로</li>
-      <li><b>“서버에 연결하지 못했습니다”</b> → 웹 앱 주소를 새 탭에서 열어 보기. “노트 앱 서버가 동작 중”이 보여야 정상. 안 보이면 <b>배포 → 배포 관리</b>에서 <code>/exec</code> 주소를 다시 복사</li>
-      <li>학교 계정은 막혀 있을 수 있으니 <b>개인 Gmail</b>로 만드세요</li>
-    </ul>
-  </details>
+    <div class="item">
+      <div class="ic">📧</div>
+      <div>
+        <h3>개인 Gmail 계정으로 만드세요</h3>
+        <p>학교(교육청) 계정은 막혀 있는 경우가 많습니다.</p>
+      </div>
+    </div>
 
-  <details>
-    <summary>코드 직접 보기</summary>
-    <p class="muted">마지막 줄이 <code>// ===== 코드 끝 …</code>이면 끝까지 복사된 것입니다. <a href="apps-script/Code.gs" download="Code.gs">파일로 받기</a></p>
-    <pre id="code">불러오는 중…</pre>
-  </details>
+    <div class="item">
+      <div class="ic">🔗</div>
+      <div>
+        <h3>학생 초대는 반별 링크로</h3>
+        <div class="flow"><span class="k">☁️ 구름 버튼</span><span class="arrow">→</span><span class="k">2학년 3반 초대 링크</span><span class="arrow">→</span><span class="muted">그 반 학생에게 보내기</span></div>
+        <p class="muted">반은 시트 <b>설정</b> 탭 아래쪽에 이름만 적으면 생깁니다.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">📝</div>
+      <div>
+        <h3>과제 내주기</h3>
+        <div class="flow"><span class="k">문제지 만들기</span><span class="arrow">→</span><span class="k blue round">과제로 내주기</span><span class="arrow">→</span><span class="muted">반 고르기</span></div>
+        <p class="muted">PDF 활동지는 <span class="k">가져오기</span> 로 불러온 뒤 같은 방법으로 내줍니다.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">✏️</div>
+      <div>
+        <h3>피드백 돌려주기 (둘 중 하나)</h3>
+        <p>① 시트 <b>노트</b> 탭의 <span class="k yellow">선생님 피드백</span> 칸에 쓰기</p>
+        <p>② 앱 <span class="k">☁️ 구름</span> → 학생 줄의 <span class="k">피드백</span>, 또는 학생 노트를 열고 빨간 펜으로 고친 뒤 <span class="k blue round">돌려주기</span></p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">🤖</div>
+      <div>
+        <h3>AI 검사는 선택</h3>
+        <p>시트 <b>AI 설정</b> 탭 B1 칸에 키 하나만 넣으면 됩니다. <span class="tag gray">Gemini 무료</span><span class="tag gray">ChatGPT 유료</span><span class="tag gray">Claude 유료</span></p>
+        <p class="muted">키 받는 방법은 그 탭에 있습니다. 넣은 뒤 시트 메뉴 <b>노트 앱 → AI 연결 시험</b>.</p>
+      </div>
+    </div>
+
+    <details>
+      <summary>연결이 안 될 때</summary>
+      <ul>
+        <li><b>“비밀번호를 … 바꿔 주세요”</b> → 설정 탭 비밀번호를 영문+숫자 8자 이상으로</li>
+        <li><b>“서버에 연결하지 못했습니다”</b> → 웹 앱 주소를 새 탭에서 열어 “노트 앱 서버가 동작 중”이 보이는지 확인. 안 보이면 <b>배포 관리</b>에서 <code>/exec</code> 주소를 다시 복사</li>
+        <li>코드를 바꿨는데 그대로면 → 위의 <b>배포 관리 → ✏ → 새 버전</b>을 했는지 확인</li>
+      </ul>
+    </details>
+    <details>
+      <summary>코드 보기</summary>
+      <p class="muted">마지막 줄이 <code>// ===== 코드 끝 …</code>이면 끝까지 복사된 것입니다. <a href="apps-script/Code.gs" download="Code.gs">파일로 받기</a> · <button class="k" id="copy">코드 복사</button></p>
+      <pre id="code">불러오는 중…</pre>
+    </details>
+  </section>
+
+  <!-- 학생 -->
+  <section class="pane" id="student">
+    <div class="item">
+      <div class="ic">1️⃣</div>
+      <div>
+        <h3>선생님이 준 링크로 들어가 이름 쓰기</h3>
+        <p>학번과 이름을 함께: <span class="k">10213 김하늘</span></p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">2️⃣</div>
+      <div>
+        <h3>맨 위 <b>받은 과제</b>를 누르기</h3>
+        <span class="card-mock"><b>광합성 확인</b><span style="color:#3a6df0">풀기</span></span>
+      </div>
+    </div>
+
+    <div class="item warn">
+      <div class="ic">3️⃣</div>
+      <div>
+        <h3>다 쓰면 <span class="k blue round">제출하기</span> 한 번 누르기 <span class="tag red">꼭!</span></h3>
+        <div class="flow"><span class="k blue round">제출하기</span><span class="arrow">→</span><span class="k green round">제출됨 ✓</span><span class="muted">초록색이 보이면 끝</span></div>
+        <p class="muted">여러 번 누르지 않아도 됩니다. 고쳐 쓰면 다시 파란 <b>제출하기</b>로 바뀌니 그때 한 번 더 누르세요.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">✉️</div>
+      <div>
+        <h3>피드백이 오면 카드가 바뀝니다</h3>
+        <span class="card-mock" style="border-color:#3a6df0"><b>광합성 확인</b><span class="k pink" style="border:0;padding:0;height:auto">새 피드백 ✉</span></span>
+        <p class="muted">눌러서 선생님 글과 첨삭 노트를 보세요.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">⚠️</div>
+      <div>
+        <h3>하면 안 되는 것</h3>
+        <p>🚫 브라우저 <b>방문 기록·사이트 데이터 지우기</b> (기기에 저장된 노트가 지워져요)</p>
+        <p>🚫 다른 기기에서 <b>초대 링크로 다시 참여</b> → 대신 <span class="k">☁️ 구름</span> → <span class="k">다른 기기에서 이어 쓰기 링크</span></p>
+      </div>
+    </div>
+  </section>
 </main>
 <script>
+  document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === b));
+    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === b.dataset.p));
+  }));
+  if (location.hash === '#student') document.querySelector('.tab.s').click();
   let code = '';
   fetch('apps-script/Code.gs').then((r) => r.text()).then((t) => { code = t; document.getElementById('code').textContent = t; });
   document.getElementById('copy').addEventListener('click', async (e) => {
-    try { await navigator.clipboard.writeText(code); e.target.textContent = '복사됨 ✓'; }
-    catch { document.querySelector('details:last-of-type').open = true; e.target.textContent = '아래 코드를 직접 복사하세요'; }
+    try { await navigator.clipboard.writeText(code); e.target.textContent = '복사됨 ✓'; } catch { e.target.textContent = '아래 코드를 직접 복사하세요'; }
     setTimeout(() => { e.target.textContent = '코드 복사'; }, 2500);
   });
 </script>

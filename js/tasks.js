@@ -96,11 +96,12 @@ function rubricEditor(initial, getAi) {
 }
 
 /* ---------- 문제지 만들기 ---------- */
+// locked: 지우개로 지워지지 않는 문제지 선 (올가미로는 고르고 옮길 수 있다)
 const line = (x1, y1, x2, y2, color = LINE, width = 1.2) => ({
-  type: 'stroke', id: uid(), tool: 'pen', color, width, constant: true, pts: new Float32Array([x1, y1, 0.5, x2, y2, 0.5]),
+  type: 'stroke', id: uid(), tool: 'pen', color, width, constant: true, locked: true, pts: new Float32Array([x1, y1, 0.5, x2, y2, 0.5]),
 });
 const box = (x, y, w, hh) => ({
-  type: 'stroke', id: uid(), tool: 'pen', color: '#9aa6b8', width: 1.4, constant: true, closed: true,
+  type: 'stroke', id: uid(), tool: 'pen', color: '#9aa6b8', width: 1.4, constant: true, closed: true, locked: true,
   pts: new Float32Array([x, y, 0.5, x + w, y, 0.5, x + w, y + hh, 0.5, x, y + hh, 0.5]),
 });
 const text = (x, y, w, size, str, bold = false) => ({ type: 'text', id: uid(), x, y, w, size, color: INK, text: str, bold });
@@ -401,10 +402,15 @@ export async function renderStudentTasks(lib, container) {
   const seen = seenMap();
   const mine = res.mine || [];
   const items = [];
+  const SKEW = 2 * 60 * 1000; // 기기 시계가 조금 달라도 괜찮게
   for (const t of res.tasks || []) {
-    const sub = mine.find((m) => m.taskId === t.id && (m.feedback || m.returned)) || mine.find((m) => m.taskId === t.id);
-    const nb = local.find((n) => n.taskId === t.id && !n.returnOf);
-    items.push({ task: t, sub, nb });
+    const ver = t.assignedAt || 0;
+    // 선생님이 같은 과제를 다시 내줬으면, 그 전에 낸 답안은 '이번 과제'로 치지 않는다
+    const cur = mine.filter((m) => m.taskId === t.id && (!ver || (m.updatedAt || 0) >= ver - SKEW));
+    const sub = cur.find((m) => m.feedback || m.returned) || cur[0];
+    const nb = local.find((n) => n.taskId === t.id && !n.returnOf && !n.taskOld);
+    const outdated = !!(nb && ver && nb.taskVersion && ver > nb.taskVersion + SKEW && !sub);
+    items.push({ task: t, sub, nb, outdated });
   }
   // 과제가 아닌 노트에 온 피드백
   for (const m of mine) if ((m.feedback || m.returned) && !items.some((i) => i.sub === m)) items.push({ task: null, sub: m, nb: null });
@@ -414,19 +420,20 @@ export async function renderStudentTasks(lib, container) {
   let fresh = 0;
   const row = h('div', { class: 'task-row' });
   for (const it of items) {
-    const { task, sub, nb } = it;
+    const { task, sub, nb, outdated } = it;
     const hasFb = sub && (sub.feedback || sub.returned);
     const isNew = hasFb && seen[sub.noteId] !== fbKey(sub);
     if (isNew) fresh++;
     let status, cls;
     if (hasFb) { status = isNew ? '새 피드백 ✉' : '피드백 보기'; cls = 'fb'; }
+    else if (outdated) { status = '새 문제 · 풀기'; cls = 'todo'; }
     else if (!nb) { status = sub ? '제출됨 ✓' : '풀기'; cls = sub ? 'done' : 'todo'; }
     else if (nb.fresh) { status = '풀기'; cls = 'todo'; }
     else if ((nb.syncedAt || 0) >= nb.updatedAt) { status = '제출됨 ✓'; cls = 'done'; }
     else { status = '제출 안 함'; cls = 'wait'; }
     row.append(h('button', {
       class: `task-card ${cls} ${isNew ? 'new' : ''}`,
-      onclick: () => (hasFb ? feedbackDialog(lib, it) : openTask(lib, task)),
+      onclick: () => (hasFb ? feedbackDialog(lib, it) : openTask(lib, task, outdated)),
     },
     h('div', { class: 'task-title ellipsis' }, task?.title || sub.title),
     h('div', { class: 'task-meta' }, h('span', { class: 'task-status' }, status), task?.due ? h('span', { class: 'muted' }, `마감 ${task.due.slice(5).replace('-', '/')}`) : null)));
@@ -435,10 +442,18 @@ export async function renderStudentTasks(lib, container) {
   if (fresh && !lib.toldFeedback) { lib.toldFeedback = true; toast(`선생님 피드백이 ${fresh}개 왔어요 ✉`, 3500); }
 }
 
-async function openTask(lib, task) {
+async function openTask(lib, task, outdated = false) {
+  if (outdated) {
+    const ok = await dialog({
+      title: '선생님이 문제를 새로 냈어요',
+      body: '새 문제지를 받습니다. 전에 쓴 노트는 “(예전 문제)”로 남아요.',
+      buttons: [{ label: '취소', value: false }, { label: '새 문제 받기', value: true, primary: true }],
+    });
+    if (!ok) return;
+  }
   try {
     progress('과제 받는 중…');
-    const nb = await startTask(task);
+    const nb = await startTask(task, { fresh: outdated });
     progress(null);
     lib.app.openNotebook(nb.id);
   } catch (e) {

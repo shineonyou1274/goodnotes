@@ -592,6 +592,12 @@ function dateText_(v) {
   return String(v);
 }
 
+function timeOf_(v) {
+  if (!v) return 0;
+  const t = Object.prototype.toString.call(v) === '[object Date]' ? v.getTime() : Date.parse(String(v));
+  return isNaN(t) ? 0 : t;
+}
+
 function splitKeys_(s) {
   return String(s || '').split(/[,，\n]/).map((k) => k.trim()).filter(String);
 }
@@ -628,7 +634,10 @@ function assignTask_(req, who) {
 function listTasks_(req, who) {
   const tasks = rows_(taskSheet_())
     .filter((x) => x.r[T.id] && taskVisible_(who, x.r))
-    .map((x) => ({ id: String(x.r[T.id]), title: x.r[T.title], cls: x.r[T.cls], due: dateText_(x.r[T.due]) }));
+    .map((x) => ({
+      id: String(x.r[T.id]), title: x.r[T.title], cls: x.r[T.cls], due: dateText_(x.r[T.due]),
+      assignedAt: timeOf_(x.r[T.created]),
+    }));
   const showScore = who.role !== 'owner' && aiSettings_().showScore;
   const mine = who.role === 'owner' ? [] : rows_(notesSheet_())
     .filter((x) => x.r[C.owner] === who.owner && (cell_(x.r, C.taskId) || String(cell_(x.r, C.feedback)).trim() || cell_(x.r, C.ret)))
@@ -891,6 +900,8 @@ function aiSheet_() {
     if (!String(sh.getRange(5, 1).getValue())) {
       sh.getRange(5, 1, 1, 3).setValues([['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임']]);
     }
+    // 예전 안내(Gemini·Claude만)는 새 안내(ChatGPT 포함)로 바꾼다
+    if (String(sh.getRange(8, 1).getValue()).indexOf('ChatGPT') < 0) writeAiGuide_(sh);
     return sh;
   }
   sh = ss.insertSheet(AI_SHEET);
@@ -900,25 +911,12 @@ function aiSheet_() {
     ['AI에게 부탁', '학생 눈높이에 맞게 친절하게. 잘한 점 1가지, 고칠 점 1~2가지. 5문장 이내.', '← 자유롭게 고치세요'],
     ['모델', '', '← 비워 두면 자동'],
     ['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임'],
-    ['AI 키 받는 방법', '(무료 · 구글 Gemini)', ''],
-    ['1', 'https://aistudio.google.com/apikey 열기', '이 시트와 같은 구글 계정으로'],
-    ['2', '[Create API key] (API 키 만들기) 누르기', ''],
-    ['3', 'AIza로 시작하는 키를 복사해 위 B1 칸에 붙여 넣기', ''],
-    ['4', '메뉴 [노트 앱 → AI 연결 시험]으로 확인. 끝!', ''],
-    ['', '', ''],
-    ['알아 두기', '', ''],
-    ['•', '무료 사용량을 넘으면 잠시 뒤 다시 됩니다. 무료로 쓰면 구글이 내용을 서비스 개선에 쓸 수 있습니다.', ''],
-    ['•', '학생 답안 그림이 AI 회사로 보내집니다. 학교 지침을 확인하세요.', ''],
-    ['•', 'Claude를 쓰려면 console.anthropic.com → API Keys에서 받은 키(sk-ant-…)를 넣으세요. (유료)', ''],
-    ['•', "AI 결과는 '노트' 탭 [AI 피드백 초안] 칸에 들어갑니다. 고쳐서 [선생님 피드백] 칸에 쓰면 학생에게 갑니다.", ''],
-    ['•', "루브릭은 앱에서 과제를 내줄 때 정합니다. '과제' 탭 [루브릭] 칸에서도 고칠 수 있습니다. (한 줄에 하나: 기준 | 배점 | 잘함: … / 보통: … / 부족: …)", ''],
   ];
   sh.getRange(1, 1, rows.length, 3).setValues(rows);
+  writeAiGuide_(sh);
   sh.getRange(1, 1, 5, 1).setFontWeight('bold');
   sh.getRange(1, 2, 1, 1).setBackground('#fff6d6');
   sh.getRange(1, 3, 5, 1).setFontColor('#6e6e73');
-  sh.getRange(6, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
-  sh.getRange(12, 1).setFontWeight('bold');
   sh.setColumnWidth(1, 130);
   sh.setColumnWidth(2, 460);
   sh.setColumnWidth(3, 420);
@@ -928,6 +926,31 @@ function aiSheet_() {
     sh.getRange(5, 2).setDataValidation(yesNo);
   } catch (e) { /* 목록 상자는 없어도 된다 */ }
   return sh;
+}
+
+// 'AI 설정' 탭 6줄부터: 키 받는 방법
+function writeAiGuide_(sh) {
+  const rows = [
+    ['AI 키 받는 방법', '셋 중 하나만 넣으면 됩니다. 키 모양을 보고 앱이 알아서 고릅니다.', ''],
+    ['구글 Gemini (무료)', 'aistudio.google.com/apikey → [Create API key] → AIza…로 시작하는 키 복사', '이 시트와 같은 구글 계정으로'],
+    ['ChatGPT (유료)', 'platform.openai.com/api-keys → [Create new secret key] → sk-…로 시작하는 키 복사', 'Billing에서 금액을 충전해야 씁니다'],
+    ['Claude (유료)', 'console.anthropic.com → API Keys → [Create Key] → sk-ant-…로 시작하는 키 복사', 'Billing에서 금액을 충전해야 씁니다'],
+    ['확인', "키를 B1 칸에 붙여 넣고 시트 메뉴 [노트 앱 → AI 연결 시험]. '성공'이 뜨면 끝!", ''],
+    ['', '', ''],
+    ['알아 두기', '', ''],
+    ['•', 'ChatGPT Plus·Claude Pro 같은 월 구독과 API 키는 따로입니다. API 키는 쓴 만큼 요금이 나갑니다.', ''],
+    ['•', '무료 Gemini는 사용량을 넘으면 잠시 뒤 다시 됩니다. 무료로 쓰면 구글이 내용을 서비스 개선에 쓸 수 있습니다.', ''],
+    ['•', '학생 답안 그림이 AI 회사로 보내집니다. 학교 지침을 확인하세요.', ''],
+    ['•', "AI 결과는 '노트' 탭 [AI 피드백 초안] 칸에 들어갑니다. 고쳐서 [선생님 피드백] 칸에 쓰면 학생에게 갑니다.", ''],
+    ['•', "루브릭은 앱에서 과제를 내줄 때 정합니다. '과제' 탭 [루브릭] 칸에서도 고칠 수 있습니다. (한 줄에 하나: 기준 | 배점 | 잘함: … / 보통: … / 부족: …)", ''],
+    ['•', '모델 칸을 비우면 Gemini는 gemini-flash-latest, ChatGPT는 gpt-5-mini, Claude는 claude-sonnet-5-5를 씁니다.', ''],
+  ];
+  sh.getRange(6, 1, 20, 3).setValues(Array.from({ length: 20 }, (_, i) => rows[i] || ['', '', '']));
+  sh.getRange(6, 1, 20, 3).setFontWeight('normal').setFontColor('#1c1c1e');
+  sh.getRange(6, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
+  sh.getRange(7, 1, 4, 1).setFontWeight('bold');
+  sh.getRange(7, 3, 4, 1).setFontColor('#6e6e73');
+  sh.getRange(12, 1).setFontWeight('bold');
 }
 
 function aiSettings_() {
@@ -946,8 +969,16 @@ function askAI_(ai, prompt, opt) {
   opt = opt || {};
   if (!ai.key) throw new Error("'AI 설정' 탭에 AI 키를 넣어 주세요.");
   const claude = /^sk-ant-/.test(ai.key);
+  const gpt = !claude && /^sk-/.test(ai.key);
   let url, headers, body;
-  if (claude) {
+  if (gpt) {
+    url = 'https://api.openai.com/v1/responses';
+    headers = { Authorization: 'Bearer ' + ai.key };
+    const content = [];
+    if (opt.pdf) content.push({ type: 'input_file', filename: 'answer.pdf', file_data: 'data:application/pdf;base64,' + opt.pdf });
+    content.push({ type: 'input_text', text: prompt });
+    body = { model: ai.model || 'gpt-5-mini', input: [{ role: 'user', content: content }] };
+  } else if (claude) {
     url = 'https://api.anthropic.com/v1/messages';
     headers = { 'x-api-key': ai.key, 'anthropic-version': '2023-06-01' };
     const content = [];
@@ -975,10 +1006,14 @@ function askAI_(ai, prompt, opt) {
       const msg = String((json.error && json.error.message) || res.getContentText()).slice(0, 200);
       if (code === 429) throw new Error('AI 사용량 한도에 걸렸습니다. 잠시 뒤 다시 해 주세요.');
       if (code === 401 || code === 403 || /api.?key|authentication/i.test(msg)) throw new Error("AI 키가 맞지 않습니다. 'AI 설정' 탭의 키를 확인하세요.");
+      if (/quota|billing|credit/i.test(msg)) throw new Error('AI 요금 잔액이 없습니다. 키를 만든 사이트의 Billing에서 충전해 주세요.');
       throw new Error('AI 요청 실패 (' + code + '): ' + msg);
     }
     let text = '';
-    if (claude) {
+    if (gpt) {
+      text = json.output_text || (json.output || []).reduce((all, o) => all.concat(o.type === 'message' ? o.content || [] : []), [])
+        .filter((c) => c.type === 'output_text').map((c) => c.text).join('');
+    } else if (claude) {
       text = (json.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
     } else {
       const cand = (json.candidates || [])[0];
