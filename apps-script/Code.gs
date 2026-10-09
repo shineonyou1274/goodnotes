@@ -969,6 +969,7 @@ function aiSettings_() {
 function askAI_(ai, prompt, opt) {
   opt = opt || {};
   if (!ai.key) throw new Error("'AI 설정' 탭에 AI 키를 넣어 주세요.");
+  if (/^sk-ant-admin/.test(ai.key)) throw new Error('Claude 관리자(Admin) 키로는 AI를 쓸 수 없습니다. 일반 API 키(sk-ant-api…)를 넣어 주세요.');
   const claude = /^sk-ant-/.test(ai.key);
   const gpt = !claude && /^sk-/.test(ai.key);
   let url, headers, body;
@@ -1061,6 +1062,7 @@ function AI연결시험() {
   let msg;
   const ai = aiSettings_();
   if (!ai.key) msg = "'AI 설정' 탭 B1 칸에 AI 키를 먼저 넣어 주세요.";
+  else if (/^sk-ant-admin/.test(ai.key)) msg = '관리자(Admin) 키입니다. 이 키로는 AI에게 물을 수 없습니다. console.anthropic.com → API Keys에서 일반 키(sk-ant-api…)를 만들어 넣어 주세요.';
   else if (!/^(sk-|AIza)/.test(ai.key)) msg = '키 모양이 낯섭니다. Gemini 키는 AIza…, ChatGPT 키는 sk-…, Claude 키는 sk-ant-…로 시작합니다. 키 전체를 다시 복사해 주세요.';
   else {
     try { msg = providerName_(ai) + ' 연결 성공! 답: ' + askAI_(ai, '“연결 성공”이라고만 답하세요.'); } catch (e) { msg = e.message; }
