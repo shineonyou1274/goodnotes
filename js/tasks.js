@@ -5,6 +5,7 @@ import { measureTextHeight } from './render.js';
 import { exportBackup } from './backup.js';
 import {
   getCloud, ping, setCloud, listTasks, startTask, openReturn, assignNotebook, noteInfo, giveBack, aiQuestions,
+  aiWrite, aiRubric,
 } from './cloud.js';
 import { h, toast, progress, dialog } from './util.js';
 
@@ -26,6 +27,72 @@ function seg(options, value, onChange) {
   };
   draw();
   return el;
+}
+
+/* ---------- 루브릭 ---------- */
+// 시트에 적는 모양과 같다: 기준 | 배점 | 잘함: … / 보통: … / 부족: …
+export function parseRubric(text) {
+  return String(text || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const p = l.split('|').map((x) => x.trim());
+    const lv = {};
+    String(p[2] || '').split('/').forEach((seg) => {
+      const m = seg.match(/^\s*(잘함|보통|부족)\s*[:：]\s*([\s\S]*)$/);
+      if (m) lv[m[1]] = m[2].trim();
+    });
+    return { name: p[0], max: Math.max(1, Math.round(Number(p[1])) || 1), good: lv['잘함'] || '', mid: lv['보통'] || '', low: lv['부족'] || '' };
+  }).filter((c) => c.name);
+}
+
+const clean = (s) => String(s || '').replace(/[|/\n]/g, ' ').trim();
+export function formatRubric(list) {
+  return list.filter((c) => clean(c.name)).map((c) => {
+    const lv = [['잘함', c.good], ['보통', c.mid], ['부족', c.low]].filter(([, v]) => clean(v)).map(([k, v]) => `${k}: ${clean(v)}`).join(' / ');
+    return `${clean(c.name)} | ${c.max}${lv ? ` | ${lv}` : ''}`;
+  }).join('\n');
+}
+
+const EXAMPLE_RUBRIC = [
+  { name: '내용 이해', max: 4, good: '핵심 개념을 정확히 씀', mid: '일부만 맞게 씀', low: '잘못 이해함' },
+  { name: '근거와 설명', max: 3, good: '까닭을 들어 설명함', mid: '설명이 짧음', low: '설명이 없음' },
+  { name: '표현', max: 3, good: '알맞은 낱말로 또박또박 씀', mid: '알아보기 어려운 곳이 있음', low: '알아보기 어려움' },
+];
+
+// 루브릭 편집기. getAi: AI로 만들기를 누르면 부를 함수(없으면 버튼 없음)
+function rubricEditor(initial, getAi) {
+  let list = initial.map((c) => ({ ...c }));
+  const el = h('div', { class: 'rubric-ed' });
+  const draw = () => {
+    el.innerHTML = '';
+    list.forEach((c, i) => {
+      const inp = (key, ph, cls = '') => h('input', { class: `input ${cls}`, type: 'text', placeholder: ph, value: c[key] || '', oninput: (e) => { c[key] = e.target.value; } });
+      el.append(h('div', { class: 'rubric-row' },
+        h('div', { class: 'rubric-top' },
+          inp('name', '평가 기준 (예: 내용 이해)', 'grow'),
+          h('select', { class: 'input pts', 'aria-label': '배점', onchange: (e) => { c.max = Number(e.target.value); showTotal(); } },
+            Array.from({ length: 10 }, (_, k) => h('option', { value: k + 1, selected: c.max === k + 1 }, `${k + 1}점`))),
+          h('button', { class: 'mini-btn', 'aria-label': '기준 지우기', onclick: () => { list.splice(i, 1); draw(); } }, '✕')),
+        h('div', { class: 'rubric-lv' }, inp('good', '잘함일 때'), inp('mid', '보통일 때'), inp('low', '부족할 때'))));
+    });
+    el.append(h('div', { class: 'btn-row' },
+      h('button', { class: 'btn small', onclick: () => { list.push({ name: '', max: 3 }); draw(); } }, '+ 기준 더하기'),
+      !list.length ? h('button', { class: 'btn small', onclick: () => { list = EXAMPLE_RUBRIC.map((c) => ({ ...c })); draw(); } }, '예시 넣기') : null,
+      getAi ? h('button', {
+        class: 'btn small', onclick: async () => {
+          try {
+            progress('AI가 루브릭을 만드는 중…');
+            const got = await getAi();
+            progress(null);
+            if (got.length) { list = got; draw(); toast('AI가 만든 루브릭입니다. 고쳐서 쓰세요.'); }
+          } catch (e) { progress(null); toast(e.message, 5000); }
+        },
+      }, '✨ AI로 만들기') : null,
+      list.length ? totalEl : null));
+    showTotal();
+  };
+  const totalEl = h('span', { class: 'muted small rubric-total' });
+  const showTotal = () => { totalEl.textContent = `합계 ${list.reduce((n, c) => n + (c.max || 0), 0)}점`; };
+  draw();
+  return { el, get: () => list.filter((c) => clean(c.name)) };
 }
 
 /* ---------- 문제지 만들기 ---------- */
@@ -90,7 +157,7 @@ export async function worksheetDialog(app) {
   const cfg = getCloud();
   const owner = cfg?.mode === 'owner';
   let style = 'lines', length = 'mid';
-  let extra = { answers: [], keywords: [] };
+  let extra = { answers: [], keywords: [], rubric: [] };
   const title = h('input', { class: 'input', type: 'text', placeholder: '예: 3단원 확인 문제' });
   const qs = h('textarea', { class: 'input qs-box', placeholder: '한 줄에 문제 하나씩\n예: 광합성에 필요한 세 가지를 쓰시오.\n예: 잎이 초록색인 까닭을 설명하시오.' });
   const nameChk = h('input', { type: 'checkbox', checked: true });
@@ -120,10 +187,11 @@ export async function worksheetDialog(app) {
     const questions = qs.value.split('\n').map((s) => s.trim()).filter(Boolean);
     if (!questions.length) { toast('문제를 한 줄 이상 쓰세요'); continue; }
     const { nb, pages } = buildWorksheet({ title: title.value.trim() || '문제지', questions, style, length, nameField: nameChk.checked });
-    if (extra.answers.length || extra.keywords.length) {
+    if (extra.answers.length || extra.keywords.length || extra.rubric?.length) {
       nb.taskInfo = {
         rubric: extra.answers.map((a, i) => `${i + 1}. ${a}`).join('\n'),
         keywords: extra.keywords.join(', '),
+        criteria: formatRubric(extra.rubric || []),
       };
     }
     await db.putNotebookWithPages(nb, pages);
@@ -175,6 +243,7 @@ export async function assignDialog(nbId) {
   const keys = h('input', { class: 'input', type: 'text', placeholder: '예: 빛, 물, 이산화 탄소', value: info.keywords || '' });
   const rubric = h('textarea', { class: 'input rubric-box', placeholder: '예: 1. 빛, 물, 이산화 탄소\n2. 엽록소 때문', value: '' });
   rubric.value = info.rubric || '';
+  const ed = rubricEditor(parseRubric(info.criteria), () => aiRubric(nb.title, rubric.value.trim()));
   for (;;) {
     const ok = await dialog({
       title: `“${nb.title}” 과제로 내주기`,
@@ -182,7 +251,8 @@ export async function assignDialog(nbId) {
         field('반', checks),
         field('마감 (안 써도 됨)', due),
         field('핵심 낱말 (자동 검사용, 안 써도 됨)', keys, '학생 손글씨에 이 낱말이 있는지 시트에 표시합니다.'),
-        field('모범 답안·채점 기준 (AI 검사용, 안 써도 됨)', rubric, "시트 'AI 설정' 탭에 AI 키를 넣으면 AI가 피드백 초안을 씁니다.")),
+        field('모범 답안 (AI 검사용, 안 써도 됨)', rubric),
+        field('루브릭 (채점 기준, 안 써도 됨)', ed.el, "AI 키가 있으면 제출할 때 AI가 이 기준으로 채점하고 피드백 초안을 씁니다. 없으면 선생님이 돌려주기 창에서 채점합니다.")),
       buttons: [{ label: '취소', value: false }, { label: info.assignedAt ? '다시 내주기' : '내주기', value: true, primary: true }],
     });
     if (!ok) return false;
@@ -190,7 +260,7 @@ export async function assignDialog(nbId) {
     try {
       await assignNotebook(nbId, {
         classes: classes.map((c) => c.name).filter((n) => picked.has(n)),
-        due: due.value, keywords: keys.value.trim(), rubric: rubric.value.trim(),
+        due: due.value, keywords: keys.value.trim(), rubric: rubric.value.trim(), criteria: formatRubric(ed.get()),
       }, (m) => progress(m));
       progress(null);
       await dialog({
@@ -223,8 +293,67 @@ export async function giveBackDialog(remote, copy = null) {
   const fb = h('textarea', { class: 'input feedback-box', placeholder: '학생에게 보낼 피드백' });
   fb.value = info.feedback || info.ai.replace(/^AI 실패:.*$/s, '') || '';
   const withNote = h('input', { type: 'checkbox', checked: !!copy });
+  // 루브릭 채점표: AI가 매긴 점수가 있으면 미리 채운다
+  const rubric = info.rubric || [];
+  const scores = rubric.map((c) => {
+    const s = (info.scores || []).find((x) => x.name === c.name);
+    return { name: c.name, max: c.max, score: s ? Math.min(c.max, s.score) : null, reason: s?.reason || '' };
+  });
+  const totalEl = h('span', { class: 'strong' });
+  const updateTotal = () => {
+    const done = scores.every((s) => s.score !== null);
+    totalEl.textContent = done ? `합계 ${scores.reduce((a, s) => a + s.score, 0)} / ${scores.reduce((a, s) => a + s.max, 0)}점` : '모든 기준에 점수를 고르세요';
+  };
+  const levelOf = (c, score) => {
+    const r = score / c.max;
+    return r >= 0.8 ? c.good : r >= 0.5 ? c.mid : c.low;
+  };
+  const table = rubric.length ? h('div', { class: 'score-table' }, rubric.map((c, i) => {
+    const hint = h('div', { class: 'muted small' });
+    const showHint = () => { hint.textContent = scores[i].reason || (scores[i].score !== null ? levelOf(c, scores[i].score) : '') || ''; };
+    const btns = h('div', { class: 'score-btns' });
+    const drawBtns = () => {
+      btns.innerHTML = '';
+      for (let v = 0; v <= c.max; v++) {
+        btns.append(h('button', {
+          class: `score-btn ${scores[i].score === v ? 'active' : ''}`,
+          onclick: () => { scores[i].score = v; scores[i].reason = ''; drawBtns(); showHint(); updateTotal(); },
+        }, String(v)));
+      }
+    };
+    drawBtns(); showHint();
+    return h('div', { class: 'score-row' }, h('div', { class: 'strong' }, `${c.name} `, h('span', { class: 'muted small' }, `(${c.max}점)`)), btns, hint);
+  }), h('div', { class: 'score-total' }, totalEl)) : null;
+  updateTotal();
+  const ready = () => scores.every((s) => s.score !== null);
+  const fromRubric = () => {
+    // AI 없이: 기준마다 고른 점수에 맞는 설명을 이어 붙인다
+    const good = rubric.filter((c, i) => scores[i].score / c.max >= 0.8);
+    const fix = rubric.filter((c, i) => scores[i].score / c.max < 0.8);
+    const line = (c, i) => `${c.name}: ${levelOf(c, scores[i].score) || (scores[i].score / c.max >= 0.8 ? '잘했어요' : '조금 더 다듬어 보세요')}`;
+    return [
+      good.length ? '잘한 점\n' + good.map((c) => line(c, rubric.indexOf(c))).join('\n') : '',
+      fix.length ? '더 노력할 점\n' + fix.map((c) => line(c, rubric.indexOf(c))).join('\n') : '',
+    ].filter(Boolean).join('\n\n');
+  };
+  const writeBtns = rubric.length ? h('div', { class: 'btn-row' },
+    h('button', {
+      class: 'btn small', onclick: () => { if (!ready()) { toast('점수를 먼저 고르세요'); return; } fb.value = fromRubric(); },
+    }, '기준 설명으로 피드백 만들기'),
+    info.aiOn ? h('button', {
+      class: 'btn small', onclick: async () => {
+        if (!ready()) { toast('점수를 먼저 고르세요'); return; }
+        try {
+          progress('AI가 피드백을 쓰는 중…');
+          fb.value = await aiWrite(remote.id, scores, fb.value.trim());
+          progress(null);
+        } catch (e) { progress(null); toast(e.message, 5000); }
+      },
+    }, '✨ 이 점수로 AI 피드백 쓰기') : null) : null;
   const body = h('div', { class: 'form' },
     info.check ? h('div', { class: 'check-line' }, h('b', {}, '낱말 확인 '), info.check) : null,
+    table,
+    writeBtns,
     info.ai && !info.feedback ? h('div', { class: 'muted small' }, 'AI가 쓴 초안입니다. 고쳐서 보내세요.') : null,
     info.ai.startsWith('AI 실패') ? h('div', { class: 'error-text' }, info.ai) : null,
     fb,
@@ -244,7 +373,7 @@ export async function giveBackDialog(remote, copy = null) {
       const fresh = await db.getNotebook(copy.id);
       data = await (await exportBackup(fresh, fresh.pageIds.map((id) => byId.get(id)).filter(Boolean))).text();
     }
-    await giveBack(remote.id, fb.value.trim(), data);
+    await giveBack(remote.id, fb.value.trim(), data, rubric.length && ready() ? scores : undefined);
     progress(null);
     toast('학생에게 돌려줬습니다 ✓');
   } catch (e) {
@@ -323,7 +452,11 @@ async function feedbackDialog(lib, { task, sub }) {
   const local = (await db.getAllNotebooks()).find((n) => n.id === sub.noteId);
   const choice = await dialog({
     title: `선생님 피드백 · ${task?.title || sub.title}`,
-    body: h('div', { class: 'feedback-text' }, sub.feedback || '선생님이 노트에 직접 첨삭해 주셨어요.'),
+    body: h('div', {},
+      sub.scores?.length ? h('div', { class: 'score-table' },
+        sub.scores.map((s) => h('div', { class: 'score-line' }, h('span', {}, s.name), h('b', {}, `${s.score} / ${s.max}`))),
+        sub.score ? h('div', { class: 'score-line total' }, h('span', {}, '합계'), h('b', {}, sub.score)) : null) : null,
+      h('div', { class: 'feedback-text' }, sub.feedback || '선생님이 노트에 직접 첨삭해 주셨어요.')),
     buttons: [
       { label: '닫기', value: null },
       local ? { label: '내 답안 열기', value: 'mine', primary: !sub.returned } : null,

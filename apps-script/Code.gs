@@ -20,14 +20,14 @@ const TEXT_SHEET = '페이지 글자';
 const TASK_SHEET = '과제';
 const AI_SHEET = 'AI 설정';
 const NOTE_HEADERS = ['노트 ID', '제목', '반', '이름', '소유자', '수정 시각', '쪽 수', '노트 파일', 'PDF', '인식된 글자',
-  '과제', '과제 ID', '낱말 확인', 'AI 피드백 초안', '선생님 피드백', '첨삭 노트'];
+  '과제', '과제 ID', '낱말 확인', 'AI 피드백 초안', '선생님 피드백', '첨삭 노트', '점수', '채점 근거'];
 const TEXT_HEADERS = ['노트 ID', '쪽', '페이지 ID', '인식된 글자', '인식 시각'];
-const TASK_HEADERS = ['과제 ID', '제목', '반', '마감', '핵심 낱말', '모범 답안·채점 기준', '제출', '과제 파일', '내준 시각'];
+const TASK_HEADERS = ['과제 ID', '제목', '반', '마감', '핵심 낱말', '모범 답안·채점 기준', '제출', '과제 파일', '내준 시각', '루브릭'];
 const C = {
   id: 0, title: 1, cls: 2, name: 3, owner: 4, updated: 5, pages: 6, file: 7, pdf: 8, text: 9,
-  task: 10, taskId: 11, check: 12, ai: 13, feedback: 14, ret: 15,
+  task: 10, taskId: 11, check: 12, ai: 13, feedback: 14, ret: 15, score: 16, reasons: 17,
 };
-const T = { id: 0, title: 1, cls: 2, due: 3, keys: 4, rubric: 5, count: 6, file: 7, created: 8 };
+const T = { id: 0, title: 1, cls: 2, due: 3, keys: 4, rubric: 5, count: 6, file: 7, created: 8, criteria: 9 };
 const ALL_CLASSES = '모든 반';
 
 function doGet() {
@@ -72,6 +72,8 @@ const ACTIONS = {
   giveBack: giveBack_,
   getReturn: getReturn_,
   aiQuestions: aiQuestions_,
+  aiWrite: aiWrite_,
+  aiRubric: aiRubric_,
 };
 
 /* ---------- 권한 ---------- */
@@ -274,7 +276,14 @@ function notesSheet_() {
   return sh;
 }
 function textSheet_() { return sheet_(TEXT_SHEET, TEXT_HEADERS); }
-function taskSheet_() { return sheet_(TASK_SHEET, TASK_HEADERS); }
+function taskSheet_() {
+  const sh = sheet_(TASK_SHEET, TASK_HEADERS);
+  if (sh.getLastColumn() < TASK_HEADERS.length) {
+    sh.getRange(1, 1, 1, TASK_HEADERS.length).setValues([TASK_HEADERS]);
+    sh.getRange(1, 1, 1, TASK_HEADERS.length).setFontWeight('bold').setBackground('#eef2fd');
+  }
+  return sh;
+}
 
 function cell_(row, i) {
   const v = row[i];
@@ -606,6 +615,7 @@ function assignTask_(req, who) {
       String(m.id), title, classes.length ? classes.join(', ') : ALL_CLASSES, String(m.due || ''),
       String(m.keywords || ''), String(m.rubric || ''),
       '=COUNTIF(\'' + NOTES_SHEET + '\'!L:L,A' + row + ')&"명"', file.getId(), new Date(),
+      String(m.criteria || ''),
     ]]);
   } finally {
     SpreadsheetApp.flush();
@@ -619,12 +629,15 @@ function listTasks_(req, who) {
   const tasks = rows_(taskSheet_())
     .filter((x) => x.r[T.id] && taskVisible_(who, x.r))
     .map((x) => ({ id: String(x.r[T.id]), title: x.r[T.title], cls: x.r[T.cls], due: dateText_(x.r[T.due]) }));
+  const showScore = who.role !== 'owner' && aiSettings_().showScore;
   const mine = who.role === 'owner' ? [] : rows_(notesSheet_())
     .filter((x) => x.r[C.owner] === who.owner && (cell_(x.r, C.taskId) || String(cell_(x.r, C.feedback)).trim() || cell_(x.r, C.ret)))
     .map((x) => ({
       noteId: x.r[C.id], title: x.r[C.title], taskId: String(cell_(x.r, C.taskId)),
       feedback: String(cell_(x.r, C.feedback)).trim(), returned: String(cell_(x.r, C.ret)),
       updatedAt: Number(x.r[C.updated]) || 0,
+      score: showScore && String(cell_(x.r, C.feedback)).trim() ? String(cell_(x.r, C.score)) : '',
+      scores: showScore && String(cell_(x.r, C.feedback)).trim() ? parseScores_(cell_(x.r, C.reasons)) : [],
     }));
   return { tasks: tasks, mine: mine };
 }
@@ -657,9 +670,17 @@ function runCheck_(id) {
     check = hit.length + '/' + keys.length + (miss.length ? ' · 빠짐: ' + miss.join(', ') : ' · 모두 있음');
   }
   const ai = aiSettings_();
-  let draft = null;
+  const criteria = parseRubric_(task.r[T.criteria]);
+  let draft = null, graded = null;
   if (ai.key) {
-    try { draft = aiFeedback_(note, task, ai); } catch (e) { draft = 'AI 실패: ' + e.message; }
+    try {
+      if (criteria.length) {
+        graded = aiGrade_(note, task, criteria, ai);
+        draft = graded.feedback;
+      } else {
+        draft = aiFeedback_(note, task, ai);
+      }
+    } catch (e) { draft = 'AI 실패: ' + e.message; }
   }
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -672,6 +693,7 @@ function runCheck_(id) {
       const oldDraft = String(cell_(cur.r, C.ai));
       const oldFeedback = String(cell_(cur.r, C.feedback)).trim();
       sh.getRange(cur.row, C.ai + 1).setValue(draft);
+      if (graded) writeScores_(sh, cur.row, graded.scores);
       // '바로 돌려주기'이면 선생님이 직접 쓴 피드백이 없을 때만 AI 피드백을 그대로 보낸다
       if (ai.autoReturn && draft.indexOf('AI 실패') !== 0 && (!oldFeedback || oldFeedback === oldDraft.trim())) {
         sh.getRange(cur.row, C.feedback + 1).setValue(draft);
@@ -684,10 +706,14 @@ function runCheck_(id) {
   return { checked: true };
 }
 
-function aiFeedback_(note, task, ai) {
+function answerPdf_(note) {
   const pdfId = fileIdFromUrl_(note.r[C.pdf]);
   if (!pdfId) throw new Error('답안 PDF가 없습니다.');
-  const pdf = Utilities.base64Encode(DriveApp.getFileById(pdfId).getBlob().getBytes());
+  return Utilities.base64Encode(DriveApp.getFileById(pdfId).getBlob().getBytes());
+}
+
+function aiFeedback_(note, task, ai) {
+  const pdf = answerPdf_(note);
   const prompt = [
     '너는 한국 학교 선생님을 돕는 조교다. 첨부한 PDF는 학생이 문제지(활동지)에 손으로 답을 쓴 것이다.',
     '인쇄된 글자는 문제이고, 손글씨가 학생의 답이다.',
@@ -701,15 +727,126 @@ function aiFeedback_(note, task, ai) {
   return askAI_(ai, prompt, { pdf: pdf });
 }
 
+/* ---------- 루브릭 ---------- */
+// 시트에 적는 모양 (한 줄에 기준 하나):
+// 내용 이해 | 4 | 잘함: 핵심을 정확히 설명 / 보통: 일부만 설명 / 부족: 잘못 이해
+function parseRubric_(text) {
+  return String(text || '').split('\n').map((l) => l.trim()).filter(String).map((l) => {
+    const p = l.split('|').map((x) => x.trim());
+    const lv = {};
+    String(p[2] || '').split('/').forEach((seg) => {
+      const m = seg.match(/^\s*(잘함|보통|부족)\s*[:：]\s*([\s\S]*)$/);
+      if (m) lv[m[1]] = m[2].trim();
+    });
+    return { name: p[0], max: Math.max(1, Math.round(Number(p[1])) || 1), good: lv['잘함'] || '', mid: lv['보통'] || '', low: lv['부족'] || '' };
+  }).filter((c) => c.name);
+}
+
+function rubricText_(criteria) {
+  return criteria.map((c) => c.name + ' (' + c.max + '점)'
+    + (c.good ? ' 잘함: ' + c.good : '') + (c.mid ? ' / 보통: ' + c.mid : '') + (c.low ? ' / 부족: ' + c.low : '')).join('\n');
+}
+
+// '채점 근거' 칸: 기준 | 점수/배점 | 근거
+function parseScores_(text) {
+  return String(text || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((p) => p[0] && p[1])
+    .map((p) => {
+      const m = p[1].match(/([\d.]+)\s*\/\s*([\d.]+)/);
+      return { name: p[0], score: m ? Number(m[1]) : 0, max: m ? Number(m[2]) : 0, reason: p[2] || '' };
+    });
+}
+
+function writeScores_(sh, row, scores) {
+  const total = scores.reduce((a, s) => a + (Number(s.score) || 0), 0);
+  const max = scores.reduce((a, s) => a + (Number(s.max) || 0), 0);
+  sh.getRange(row, C.score + 1).setValue(scores.length ? total + '/' + max : '');
+  sh.getRange(row, C.reasons + 1).setValue(scores.map((s) => s.name + ' | ' + s.score + '/' + s.max + ' | ' + String(s.reason || '').replace(/[|\n]/g, ' ')).join('\n'));
+}
+
+function parseJson_(text) {
+  const m = String(text).match(/\{[\s\S]*\}/);
+  try { return JSON.parse(m ? m[0] : text); } catch (e) { throw new Error('AI 답을 읽지 못했습니다. 다시 해 주세요.'); }
+}
+
+// AI가 루브릭으로 채점하고 피드백을 쓴다
+function aiGrade_(note, task, criteria, ai) {
+  const prompt = [
+    '너는 한국 학교 선생님을 돕는 채점 조교다. 첨부한 PDF는 학생이 문제지에 손으로 답을 쓴 것이다. 인쇄된 글자는 문제, 손글씨가 학생의 답이다.',
+    '과제: ' + task.r[T.title],
+    task.r[T.rubric] ? '모범 답안:\n' + task.r[T.rubric] : '',
+    '루브릭 (기준마다 0점부터 배점까지 정수로 채점):\n' + rubricText_(criteria),
+    '선생님의 부탁: ' + ai.ask,
+    '반드시 JSON 하나만 출력: {"scores":[{"criterion":"기준 이름 그대로","score":정수,"reason":"한 문장 근거"}],"feedback":"학생에게 줄 피드백"}',
+    'feedback에는 점수를 쓰지 말고, 루브릭 기준에 맞춰 잘한 점과 고칠 점을 쓴다. 학생 이름과 마크다운 기호는 쓰지 마라.',
+  ].filter(String).join('\n');
+  const data = parseJson_(askAI_(ai, prompt, { pdf: answerPdf_(note), json: true }));
+  const got = Array.isArray(data.scores) ? data.scores : [];
+  const scores = criteria.map((c, i) => {
+    const s = got.find((g) => String(g.criterion || '').trim() === c.name) || got[i] || {};
+    return { name: c.name, max: c.max, score: Math.max(0, Math.min(c.max, Math.round(Number(s.score)) || 0)), reason: String(s.reason || '') };
+  });
+  return { scores: scores, feedback: String(data.feedback || '').replace(/\*\*/g, '').trim() };
+}
+
 // 선생님: 노트의 검사 결과와 피드백 보기 (돌려주기 창에 채운다)
 function noteInfo_(req, who) {
   ownerOnly_(who);
   const note = findNote_(req.id);
   if (!note) throw new Error('노트를 찾을 수 없습니다.');
+  const task = findTask_(cell_(note.r, C.taskId));
   return {
     task: cell_(note.r, C.task), check: String(cell_(note.r, C.check)), ai: String(cell_(note.r, C.ai)),
     feedback: String(cell_(note.r, C.feedback)), returned: !!cell_(note.r, C.ret),
+    rubric: task ? parseRubric_(task.r[T.criteria]) : [],
+    scores: parseScores_(cell_(note.r, C.reasons)),
+    aiOn: !!aiSettings_().key,
   };
+}
+
+// 선생님이 매긴 점수로 AI가 피드백을 쓴다
+function aiWrite_(req, who) {
+  ownerOnly_(who);
+  const note = findNote_(req.id);
+  if (!note) throw new Error('노트를 찾을 수 없습니다.');
+  const task = findTask_(cell_(note.r, C.taskId));
+  const ai = aiSettings_();
+  const scores = (req.scores || []).map((s) => s.name + ': ' + s.score + '/' + s.max + (s.reason ? ' (' + s.reason + ')' : '')).join('\n');
+  const prompt = [
+    '너는 한국 학교 선생님을 돕는 조교다. 첨부한 PDF는 학생이 손으로 쓴 답안이다.',
+    task ? '과제: ' + task.r[T.title] : '',
+    task && task.r[T.rubric] ? '모범 답안:\n' + task.r[T.rubric] : '',
+    task && parseRubric_(task.r[T.criteria]).length ? '루브릭:\n' + rubricText_(parseRubric_(task.r[T.criteria])) : '',
+    scores ? '선생님이 매긴 점수 (이 점수에 맞게 써라):\n' + scores : '',
+    req.memo ? '선생님 메모: ' + String(req.memo).slice(0, 500) : '',
+    '선생님의 부탁: ' + ai.ask,
+    '학생에게 줄 피드백만 한국어로 써라. 점수 숫자는 쓰지 말고, 학생 이름과 마크다운 기호는 쓰지 마라.',
+  ].filter(String).join('\n');
+  return { feedback: askAI_(ai, prompt, { pdf: answerPdf_(note) }) };
+}
+
+// 선생님: 과제에 맞는 루브릭을 AI가 만든다
+function aiRubric_(req, who) {
+  ownerOnly_(who);
+  const prompt = [
+    '너는 한국 학교 선생님을 돕는다. 아래 과제를 채점할 루브릭을 만들어라.',
+    '과제: ' + String(req.title || '').slice(0, 200),
+    req.answers ? '문제·모범 답안:\n' + String(req.answers).slice(0, 3000) : '',
+    '평가 기준은 3~5개, 배점은 기준마다 2~5점 정수, 합계는 10점 안팎.',
+    '반드시 JSON 하나만 출력: {"rubric":[{"criterion":"평가 기준","points":정수,"good":"잘함일 때 모습","mid":"보통일 때","low":"부족할 때"}]}',
+    '설명은 학생이 읽어도 알 수 있게 짧게.',
+  ].filter(String).join('\n');
+  const data = parseJson_(askAI_(aiSettings_(), prompt, { json: true }));
+  return { rubric: normRubric_(data.rubric) };
+}
+
+function normRubric_(list) {
+  return (Array.isArray(list) ? list : []).map((r) => ({
+    name: String(r.criterion || r.name || '').replace(/[|\n]/g, ' ').trim(),
+    max: Math.max(1, Math.min(20, Math.round(Number(r.points || r.max)) || 1)),
+    good: String(r.good || '').replace(/[|/\n]/g, ' ').trim(),
+    mid: String(r.mid || '').replace(/[|/\n]/g, ' ').trim(),
+    low: String(r.low || '').replace(/[|/\n]/g, ' ').trim(),
+  })).filter((r) => r.name);
 }
 
 // 선생님: 피드백 글과 (있으면) 펜으로 첨삭한 노트를 학생에게 돌려준다
@@ -726,6 +863,7 @@ function giveBack_(req, who) {
     const note = findNote_(req.id);
     const sh = notesSheet_();
     if (req.feedback !== undefined) sh.getRange(note.row, C.feedback + 1).setValue(String(req.feedback).slice(0, 45000));
+    if (Array.isArray(req.scores)) writeScores_(sh, note.row, req.scores.slice(0, 20));
     if (fileId) {
       trash_(cell_(note.r, C.ret));
       sh.getRange(note.row, C.ret + 1).setValue(fileId);
@@ -748,14 +886,20 @@ function getReturn_(req, who) {
 function aiSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sh = ss.getSheetByName(AI_SHEET);
-  if (sh) return sh;
+  if (sh) {
+    // 예전 탭에는 '점수 보여 주기' 줄이 없다
+    if (!String(sh.getRange(5, 1).getValue())) {
+      sh.getRange(5, 1, 1, 3).setValues([['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임']]);
+    }
+    return sh;
+  }
   sh = ss.insertSheet(AI_SHEET);
   const rows = [
     ['AI 키', '', '← 아래 방법으로 받은 키를 붙여 넣으세요. 비워 두면 AI를 쓰지 않습니다'],
     ['바로 돌려주기', '아니오', '← 예: AI 피드백이 바로 학생에게 감 / 아니오: 선생님이 보고 고친 뒤 돌려줌'],
     ['AI에게 부탁', '학생 눈높이에 맞게 친절하게. 잘한 점 1가지, 고칠 점 1~2가지. 5문장 이내.', '← 자유롭게 고치세요'],
     ['모델', '', '← 비워 두면 자동'],
-    ['', '', ''],
+    ['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임'],
     ['AI 키 받는 방법', '(무료 · 구글 Gemini)', ''],
     ['1', 'https://aistudio.google.com/apikey 열기', '이 시트와 같은 구글 계정으로'],
     ['2', '[Create API key] (API 키 만들기) 누르기', ''],
@@ -767,25 +911,29 @@ function aiSheet_() {
     ['•', '학생 답안 그림이 AI 회사로 보내집니다. 학교 지침을 확인하세요.', ''],
     ['•', 'Claude를 쓰려면 console.anthropic.com → API Keys에서 받은 키(sk-ant-…)를 넣으세요. (유료)', ''],
     ['•', "AI 결과는 '노트' 탭 [AI 피드백 초안] 칸에 들어갑니다. 고쳐서 [선생님 피드백] 칸에 쓰면 학생에게 갑니다.", ''],
+    ['•', "루브릭은 앱에서 과제를 내줄 때 정합니다. '과제' 탭 [루브릭] 칸에서도 고칠 수 있습니다. (한 줄에 하나: 기준 | 배점 | 잘함: … / 보통: … / 부족: …)", ''],
   ];
   sh.getRange(1, 1, rows.length, 3).setValues(rows);
-  sh.getRange(1, 1, 4, 1).setFontWeight('bold');
+  sh.getRange(1, 1, 5, 1).setFontWeight('bold');
   sh.getRange(1, 2, 1, 1).setBackground('#fff6d6');
-  sh.getRange(1, 3, 4, 1).setFontColor('#6e6e73');
+  sh.getRange(1, 3, 5, 1).setFontColor('#6e6e73');
   sh.getRange(6, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
   sh.getRange(12, 1).setFontWeight('bold');
   sh.setColumnWidth(1, 130);
   sh.setColumnWidth(2, 460);
   sh.setColumnWidth(3, 420);
   try {
-    sh.getRange(2, 2).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['예', '아니오']).build());
+    const yesNo = SpreadsheetApp.newDataValidation().requireValueInList(['예', '아니오']).build();
+    sh.getRange(2, 2).setDataValidation(yesNo);
+    sh.getRange(5, 2).setDataValidation(yesNo);
   } catch (e) { /* 목록 상자는 없어도 된다 */ }
   return sh;
 }
 
 function aiSettings_() {
-  const v = aiSheet_().getRange(1, 2, 4, 1).getValues();
+  const v = aiSheet_().getRange(1, 2, 5, 1).getValues();
   return {
+    showScore: String(v[4][0]).trim() === '예',
     key: String(v[0][0] || '').trim(),
     autoReturn: String(v[1][0]).trim() === '예',
     ask: String(v[2][0] || '').trim() || '친절하게, 5문장 이내.',
@@ -850,15 +998,16 @@ function aiQuestions_(req, who) {
     '학년: ' + String(req.level || '').slice(0, 40),
     '문항 수: ' + (Number(req.count) || 5),
     '문제 유형: ' + String(req.kind || '서술형과 단답형 섞어서'),
-    '반드시 JSON 하나만 출력: {"questions":["문제", ...], "answers":["모범 답안", ...], "keywords":["채점 핵심 낱말", ...]}',
-    '문제 앞에 번호를 붙이지 마라. keywords는 3~8개.',
+    '반드시 JSON 하나만 출력: {"questions":["문제", ...], "answers":["모범 답안", ...], "keywords":["채점 핵심 낱말", ...],'
+      + ' "rubric":[{"criterion":"평가 기준","points":정수,"good":"잘함일 때","mid":"보통일 때","low":"부족할 때"}]}',
+    '문제 앞에 번호를 붙이지 마라. keywords는 3~8개. rubric은 기준 3~5개, 합계 10점 안팎.',
   ].join('\n');
   const text = askAI_(aiSettings_(), prompt, { json: true });
   const m = text.match(/\{[\s\S]*\}/);
   let data;
   try { data = JSON.parse(m ? m[0] : text); } catch (e) { throw new Error('AI 답을 읽지 못했습니다. 다시 눌러 주세요.'); }
   const list = (a) => (Array.isArray(a) ? a.map(String).filter(String) : []);
-  return { questions: list(data.questions), answers: list(data.answers), keywords: list(data.keywords) };
+  return { questions: list(data.questions), answers: list(data.answers), keywords: list(data.keywords), rubric: normRubric_(data.rubric) };
 }
 
 function AI연결시험() {

@@ -718,3 +718,22 @@ a.btn { text-decoration: none; color: inherit; }
   .hide-xs { display: none; }
   .lib-header { gap: 6px; }
 }
+
+/* ---------- 루브릭 ---------- */
+.rubric-ed { display: flex; flex-direction: column; gap: 10px; }
+.rubric-row { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.rubric-top { display: flex; gap: 6px; align-items: center; }
+.rubric-top .grow { flex: 1; min-width: 0; }
+.rubric-top .pts { width: 76px; flex: none; }
+.rubric-lv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.rubric-lv .input, .rubric-top .input { height: 36px; font-size: 14px; }
+@media (max-width: 520px) { .rubric-lv { grid-template-columns: 1fr; } }
+.rubric-total { align-self: center; margin-left: auto; }
+.score-table { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); margin-bottom: 10px; }
+.score-row { display: flex; flex-direction: column; gap: 4px; }
+.score-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.score-btn { min-width: 36px; height: 34px; border-radius: 17px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; }
+.score-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.score-total { text-align: right; }
+.score-line { display: flex; justify-content: space-between; font-size: 15px; }
+.score-line.total { border-top: 1px solid var(--line); padding-top: 6px; }

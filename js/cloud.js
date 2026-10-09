@@ -65,7 +65,9 @@ export const searchRemote = (q) => call('search', { q }).then((d) => d.results |
 export const removeRemote = (id) => call('remove', { id });
 export const listTasks = () => call('tasks');
 export const noteInfo = (id) => call('noteInfo', { id });
-export const giveBack = (id, feedback, data) => call('giveBack', { id, feedback, data });
+export const giveBack = (id, feedback, data, scores) => call('giveBack', { id, feedback, data, scores });
+export const aiWrite = (id, scores, memo) => call('aiWrite', { id, scores, memo }).then((d) => d.feedback);
+export const aiRubric = (title, answers) => call('aiRubric', { title, answers }).then((d) => d.rubric || []);
 export const aiQuestions = (opts) => call('aiQuestions', opts);
 
 // 이 노트를 클라우드에 올릴지
@@ -161,7 +163,7 @@ function canvasJpeg(c, q) {
 }
 
 // 선생님: 문제지를 과제로 내준다. 학생이 지우지 못하도록 페이지를 그림 한 장으로 굳혀서 보낸다.
-export async function assignNotebook(nbId, { classes, due, keywords, rubric }, onProgress = () => {}) {
+export async function assignNotebook(nbId, { classes, due, keywords, rubric, criteria }, onProgress = () => {}) {
   const nb = await db.getNotebook(nbId);
   const pages = await loadPages(nb);
   const flat = [];
@@ -177,9 +179,9 @@ export async function assignNotebook(nbId, { classes, due, keywords, rubric }, o
   const tnb = { ...nb, taskId: nb.id };
   delete tnb.taskInfo;
   const data = await (await exportBackup(tnb, flat)).text();
-  await call('assign', { meta: { id: nb.id, title: nb.title, classes, due, keywords, rubric }, data });
+  await call('assign', { meta: { id: nb.id, title: nb.title, classes, due, keywords, rubric, criteria }, data });
   const cur = await db.getNotebook(nbId);
-  cur.taskInfo = { ...(cur.taskInfo || {}), classes, due, keywords, rubric, assignedAt: Date.now() };
+  cur.taskInfo = { ...(cur.taskInfo || {}), classes, due, keywords, rubric, criteria, assignedAt: Date.now() };
   await db.putNotebook(cur);
 }
 
