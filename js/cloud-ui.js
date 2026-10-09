@@ -134,7 +134,7 @@ export async function cloudPanel(app, lib) {
     try { cfg.classes = (await ping(cfg)).classes || []; setCloud(cfg); } catch { /* 목록에서 오류를 보여 준다 */ }
   }
   const list = h('div', { class: 'remote-list' }, h('div', { class: 'muted' }, '목록을 불러오는 중…'));
-  const filter = h('select', { class: 'input class-filter hidden', 'aria-label': '반 고르기' });
+  const tools = h('div', { class: 'remote-tools' });
   const copyBtn = (label, text) => h('button', {
     class: 'btn', onclick: async () => {
       try { await navigator.clipboard.writeText(text); toast('링크를 복사했습니다'); } catch { await dialog({ title: label, body: h('textarea', { class: 'input link-box', readonly: true }, text) }); }
@@ -151,7 +151,16 @@ export async function cloudPanel(app, lib) {
           : '내 노트가 선생님께 제출됩니다. 제출하지 않을 노트는 노트 메뉴에서 “선생님께 제출”을 끄세요.'))),
     h('div', { class: 'btn-row' },
       h('button', { class: 'btn primary', onclick: () => { closeFn?.(); runSync(lib); } }, '지금 동기화'),
-      ...(cfg.mode === 'owner' ? (cfg.classes || []).map((c) => copyBtn(`${c.name} 초대 링크`, inviteLink(cfg, c.code))) : []),
+      // 반이 여럿이면 단추 하나로 모아 창에서 고른다
+      ...(cfg.mode === 'owner' && (cfg.classes || []).length === 1 ? [copyBtn(`${cfg.classes[0].name} 초대 링크`, inviteLink(cfg, cfg.classes[0].code))] : []),
+      cfg.mode === 'owner' && (cfg.classes || []).length > 1 ? h('button', {
+        class: 'btn', onclick: () => dialog({
+          title: '반 초대 링크',
+          body: h('div', { class: 'invite-list' }, cfg.classes.map((c) => h('div', { class: 'remote-row' },
+            h('div', { class: 'remote-text strong' }, c.name), copyBtn('복사', inviteLink(cfg, c.code))))),
+          buttons: [{ label: '닫기', value: null }],
+        }),
+      }, `반 초대 링크 (${cfg.classes.length}개)`) : null,
       cfg.mode === 'student' ? copyBtn('다른 기기에서 이어 쓰기 링크', deviceLink(cfg)) : null,
       h('button', {
         class: 'btn', onclick: async () => {
@@ -161,58 +170,105 @@ export async function cloudPanel(app, lib) {
         },
       }, '연결 끊기')),
     h('label', { class: 'field-label' }, cfg.mode === 'owner' ? '클라우드에 있는 노트' : '내가 제출한 노트'),
-    filter,
+    tools,
     list);
   const p = dialog({ title: '클라우드', body, buttons: [{ label: '닫기', value: null }] });
   closeFn = () => document.querySelector('.dialog-back')?.remove();
   try {
-    const ko = (a, b) => String(a || '').localeCompare(String(b || ''), 'ko', { numeric: true });
-    const all = (await listRemote()).sort((a, b) => (a.mine === b.mine ? 0 : a.mine ? -1 : 1)
-      || ko(a.cls, b.cls) || ko(a.name, b.name) || b.updatedAt - a.updatedAt);
-    const classes = [...new Set(all.filter((n) => !n.mine && n.cls).map((n) => n.cls))];
-    const tasks = [...new Set(all.filter((n) => !n.mine && n.task).map((n) => n.task))];
-    if (cfg.mode === 'owner' && (classes.length > 1 || tasks.length)) {
-      filter.classList.remove('hidden');
-      filter.append(h('option', { value: '' }, '모든 노트'),
-        ...(classes.length > 1 ? classes.map((c) => h('option', { value: 'c:' + c }, c)) : []),
-        ...tasks.map((t) => h('option', { value: 't:' + t }, `과제: ${t}`)));
-      filter.addEventListener('change', () => renderList());
-    }
-    const renderList = () => {
-      const f = filter.value;
-      const notes = !f ? all : all.filter((n) => (f.startsWith('c:') ? n.cls === f.slice(2) : n.task === f.slice(2)));
-      list.innerHTML = '';
-      if (!notes.length) list.append(h('div', { class: 'muted' }, '아직 올라간 노트가 없습니다.'));
-      let lastGroup = null;
-      for (const n of notes) {
-        const group = n.mine ? '내 노트' : [n.cls, n.name].filter(Boolean).join(' · ');
-        if (cfg.mode === 'owner' && group !== lastGroup) {
-          list.append(h('div', { class: 'remote-group' }, group));
-          lastGroup = group;
-        }
-        list.append(h('div', { class: 'remote-row' },
-          h('div', { class: 'remote-text' },
-            h('div', { class: 'strong ellipsis' }, n.title),
-            h('div', { class: 'muted small' }, [formatDate(n.updatedAt), `${n.pages}쪽`, n.check ? `낱말 ${n.check}` : '', n.feedback || n.returned ? '피드백 ✓' : '']
-              .filter(Boolean).join(' · '))),
-          h('button', { class: 'btn small', onclick: () => { closeFn(); openRemoteNote(app, n); } }, '열기'),
-          cfg.mode === 'owner' && !n.mine ? h('button', { class: 'btn small', onclick: () => giveBackDialog(n) }, '피드백') : null,
-          n.pdf ? h('a', { class: 'btn small', href: n.pdf, target: '_blank', rel: 'noopener' }, 'PDF') : null,
-          cfg.mode === 'owner' || n.mine ? h('button', {
-            class: 'mini-btn', 'aria-label': '클라우드에서 삭제', html: icons.trash, onclick: async (e) => {
-              const row = e.currentTarget.closest('.remote-row');
-              if (!window.confirm(`클라우드에서 “${n.title}” 노트를 지울까요? 드라이브의 파일도 휴지통으로 갑니다.`)) return;
-              try { await removeRemote(n.id); row.remove(); toast('클라우드에서 지웠습니다'); } catch (err) { toast(err.message, 4000); }
-            },
-          }) : null));
-      }
-    };
-    renderList();
+    const all = (await listRemote()).sort((a, b) => b.updatedAt - a.updatedAt);
+    renderRemote(app, cfg, all, tools, list, () => closeFn());
   } catch (e) {
     list.innerHTML = '';
     list.append(h('div', { class: 'error-text' }, e.message));
   }
   await p;
+}
+
+const ko = (a, b) => String(a || '').localeCompare(String(b || ''), 'ko', { numeric: true });
+
+function dayLabel(ts) {
+  const d = new Date(ts), today = new Date();
+  const days = Math.round((new Date(today.toDateString()) - new Date(d.toDateString())) / 86400000);
+  if (days === 0) return '오늘';
+  if (days === 1) return '어제';
+  return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+}
+
+// 클라우드 창의 노트 목록: (선생님) 학생 제출 / 내 노트 탭, 반·과제 고르기, 접었다 펴는 묶음
+function renderRemote(app, cfg, all, tools, list, close) {
+  const owner = cfg.mode === 'owner';
+  const subs = all.filter((n) => !n.mine);
+  const mine = all.filter((n) => n.mine);
+  let tab = owner && subs.length ? 'subs' : 'mine';
+  const clsSel = h('select', { class: 'input', 'aria-label': '반 고르기' });
+  const taskSel = h('select', { class: 'input', 'aria-label': '과제 고르기' });
+  const fill = (sel, label, values) => {
+    sel.innerHTML = '';
+    sel.append(h('option', { value: '' }, label), ...values.map((v) => h('option', { value: v }, v)));
+    sel.onchange = draw;
+  };
+  fill(clsSel, '모든 반', [...new Set(subs.map((n) => n.cls).filter(Boolean))].sort(ko));
+  fill(taskSel, '모든 과제', [...new Set(subs.map((n) => n.task || '과제 아님'))]);
+
+  function row(n) {
+    const who = owner && !n.mine ? `${n.name || ''} ` : '';
+    const meta = [owner && !n.mine && !n.task ? n.title : '', formatDate(n.updatedAt), n.check ? `낱말 ${n.check}` : '',
+      n.feedback || n.returned ? '피드백 ✓' : ''].filter(Boolean).join(' · ');
+    return h('div', { class: 'remote-row' },
+      h('button', { class: 'remote-text', onclick: () => { close(); openRemoteNote(app, n); } },
+        h('div', { class: 'strong ellipsis' }, who ? who : n.title),
+        h('div', { class: 'muted small ellipsis' }, meta)),
+      owner && !n.mine ? h('button', { class: 'btn small', onclick: () => giveBackDialog(n) }, n.feedback || n.returned ? '피드백 ✓' : '피드백') : null,
+      n.pdf ? h('a', { class: 'btn small', href: n.pdf, target: '_blank', rel: 'noopener' }, 'PDF') : null,
+      owner || n.mine ? h('button', {
+        class: 'mini-btn', 'aria-label': '클라우드에서 삭제', html: icons.trash, onclick: async (e) => {
+          const r = e.currentTarget.closest('.remote-row');
+          if (!window.confirm(`클라우드에서 “${n.title}” 노트를 지울까요? 드라이브의 파일도 휴지통으로 갑니다.`)) return;
+          try { await removeRemote(n.id); r.remove(); toast('클라우드에서 지웠습니다'); } catch (err) { toast(err.message, 4000); }
+        },
+      }) : null);
+  }
+
+  // groups: [{ title, sub, items }] — 첫 묶음만 펼쳐 둔다
+  function groups(gs) {
+    list.innerHTML = '';
+    if (!gs.length) { list.append(h('div', { class: 'muted' }, '아직 올라간 노트가 없습니다.')); return; }
+    gs.forEach((g, i) => {
+      const d = h('details', { class: 'remote-group-box' },
+        h('summary', {}, h('span', { class: 'strong' }, g.title), h('span', { class: 'muted small' }, ` ${g.sub}`)),
+        ...g.items.map(row));
+      if (i === 0) d.open = true;
+      list.append(d);
+    });
+  }
+
+  function byDay(items) {
+    const m = new Map();
+    for (const n of items) { const k = dayLabel(n.updatedAt); if (!m.has(k)) m.set(k, []); m.get(k).push(n); }
+    return [...m].map(([k, v]) => ({ title: k, sub: `${v.length}개`, items: v }));
+  }
+
+  function draw() {
+    tools.innerHTML = '';
+    if (owner) {
+      tools.append(h('div', { class: 'seg seg-wide' },
+        h('button', { class: `seg-btn ${tab === 'subs' ? 'active' : ''}`, onclick: () => { tab = 'subs'; draw(); } }, `학생 제출 ${subs.length}`),
+        h('button', { class: `seg-btn ${tab === 'mine' ? 'active' : ''}`, onclick: () => { tab = 'mine'; draw(); } }, `내 노트 ${mine.length}`)));
+      if (tab === 'subs' && subs.length) tools.append(h('div', { class: 'two-col filter-row' }, clsSel, taskSel));
+    }
+    if (tab === 'mine') { groups(byDay(owner ? mine : all)); return; }
+    const items = subs.filter((n) => (!clsSel.value || n.cls === clsSel.value) && (!taskSel.value || (n.task || '과제 아님') === taskSel.value));
+    // 과제별로 묶고, 최근에 제출이 들어온 과제를 위에. 과제 안에서는 반 → 이름 순
+    const m = new Map();
+    for (const n of items) { const k = n.task || '과제 아님'; if (!m.has(k)) m.set(k, []); m.get(k).push(n); }
+    groups([...m].map(([k, v]) => ({
+      title: k,
+      sub: `${v.length}명 · ${dayLabel(Math.max(...v.map((n) => n.updatedAt)))}`,
+      items: v.sort((a, b) => ko(a.cls, b.cls) || ko(a.name, b.name)),
+      last: Math.max(...v.map((n) => n.updatedAt)),
+    })).sort((a, b) => (a.title === '과제 아님') - (b.title === '과제 아님') || b.last - a.last));
+  }
+  draw();
 }
 
 // 손글씨 검색 결과를 container에 그린다

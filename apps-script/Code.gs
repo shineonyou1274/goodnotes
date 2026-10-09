@@ -15,7 +15,9 @@ const DEFAULT_APP_URL = 'https://shineonyou1274.github.io/goodnotes/';
 const SETTINGS_SHEET = '설정';
 const CLASS_START_ROW = 6; // '설정' 탭에서 반 목록이 시작하는 줄
 const ROOT_FOLDER = '노트 앱 저장소';
-const NOTES_SHEET = '노트';
+const NOTES_SHEET = '학생 제출';
+const MINE_SHEET = '내 노트';
+const OLD_NOTES_SHEET = '노트'; // 예전 버전: 선생님 노트와 학생 답안이 한 탭에 섞여 있었다
 const TEXT_SHEET = '페이지 글자';
 const TASK_SHEET = '과제';
 const AI_SHEET = 'AI 설정';
@@ -29,6 +31,7 @@ const C = {
 };
 const T = { id: 0, title: 1, cls: 2, due: 3, keys: 4, rubric: 5, count: 6, file: 7, created: 8, criteria: 9 };
 const ALL_CLASSES = '모든 반';
+const AI_GUIDE_VER = '안내 v3'; // 'AI 설정' 탭 안내를 바꾸면 올린다 (예전 탭은 자동으로 새 안내로 바뀐다)
 
 function doGet() {
   return out_({ ok: true, app: 'goodnotes-web', message: '노트 앱 서버가 동작 중입니다.' });
@@ -265,8 +268,48 @@ function sheet_(name, headers) {
   return sh;
 }
 
+// 학생 답안 탭
 function notesSheet_() {
-  const sh = sheet_(NOTES_SHEET, NOTE_HEADERS);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (ss && !ss.getSheetByName(NOTES_SHEET)) {
+    const old = ss.getSheetByName(OLD_NOTES_SHEET);
+    if (old) {
+      // 예전 '노트' 탭은 '학생 제출'로 이름을 바꾸고 선생님 노트는 '내 노트' 탭으로 옮긴다
+      old.setName(NOTES_SHEET);
+      const mine = mineSheet_();
+      const own = rows_(old).filter((x) => x.r[C.owner] === 'owner');
+      own.forEach((x) => mine.appendRow(x.r));
+      for (let i = own.length - 1; i >= 0; i--) old.deleteRow(own[i].row);
+    }
+  }
+  return upgradeNoteHeaders_(sheet_(NOTES_SHEET, NOTE_HEADERS));
+}
+
+// 선생님(관리자) 노트 탭
+function mineSheet_() {
+  return upgradeNoteHeaders_(sheet_(MINE_SHEET, NOTE_HEADERS));
+}
+
+function sheetFor_(who) {
+  return who.role === 'owner' ? mineSheet_() : notesSheet_();
+}
+
+// 두 탭의 줄을 함께 본다. 줄마다 어느 탭인지(sh)를 붙인다
+function allNoteRows_() {
+  const a = notesSheet_(), b = mineSheet_();
+  return rows_(a).map((x) => Object.assign(x, { sh: a })).concat(rows_(b).map((x) => Object.assign(x, { sh: b })));
+}
+
+// 학생 답안 탭을 과제 → 반 → 이름 순으로 정리한다
+function sortSubmissions_(sh) {
+  const last = sh.getLastRow();
+  if (last < 3) return;
+  sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort([
+    { column: C.task + 1, ascending: true }, { column: C.cls + 1, ascending: true }, { column: C.name + 1, ascending: true },
+  ]);
+}
+
+function upgradeNoteHeaders_(sh) {
   // 예전 시트에는 과제·피드백 칸이 없으니 제목 줄을 늘린다
   if (sh.getLastColumn() < NOTE_HEADERS.length) {
     sh.getRange(1, 1, 1, NOTE_HEADERS.length).setValues([NOTE_HEADERS]);
@@ -298,7 +341,7 @@ function rows_(sh) {
 }
 
 function findNote_(id) {
-  return rows_(notesSheet_()).find((x) => x.r[C.id] === id) || null;
+  return allNoteRows_().find((x) => x.r[C.id] === id) || null;
 }
 
 function folder_(path) {
@@ -329,7 +372,7 @@ function cleanName_(s) {
 
 /* ---------- 요청 처리 ---------- */
 function listNotes_(req, who) {
-  const notes = rows_(notesSheet_())
+  const notes = allNoteRows_()
     .filter((x) => canSee_(who, x.r))
     .map((x) => ({
       id: x.r[C.id],
@@ -367,7 +410,7 @@ function uploadNote_(req, who) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const sh = notesSheet_();
+    const sh = sheetFor_(who);
     // 같은 노트가 두 줄로 들어간 적이 있으면 하나만 남긴다
     const dups = rows_(sh).filter((x) => x.r[C.id] === meta.id);
     for (let i = dups.length - 1; i >= 1; i--) {
@@ -385,10 +428,11 @@ function uploadNote_(req, who) {
     if (cur) {
       trash_(cur.r[C.file]);
       if (cur.r[C.pdf]) trash_(fileIdFromUrl_(cur.r[C.pdf]));
-      sh.getRange(cur.row, 1, 1, values.length).setValues([values]);
+      cur.sh.getRange(cur.row, 1, 1, values.length).setValues([values]);
     } else {
       sh.appendRow(values);
     }
+    if (who.role !== 'owner') sortSubmissions_(sh);
     // 페이지 순서가 바뀌었거나 지워진 페이지가 있으면 글자 목록도 맞춘다
     const order = {};
     (meta.pageIds || []).forEach((pid, i) => { order[pid] = i + 1; });
@@ -498,7 +542,7 @@ function refreshNoteText_(id) {
     .filter((x) => x.r[0] === id && x.r[3])
     .sort((a, b) => a.r[1] - b.r[1])
     .map((x) => '[' + x.r[1] + '쪽] ' + x.r[3]);
-  notesSheet_().getRange(note.row, C.text + 1).setValue(parts.join('\n').slice(0, 45000));
+  note.sh.getRange(note.row, C.text + 1).setValue(parts.join('\n').slice(0, 45000));
 }
 
 function downloadNote_(req, who) {
@@ -517,7 +561,7 @@ function searchText_(req, who) {
   if (!q) return { results: [] };
   const terms = q.toLowerCase().split(/\s+/).map(norm_).filter(String);
   const notes = {};
-  rows_(notesSheet_()).forEach((x) => { if (canSee_(who, x.r)) notes[x.r[C.id]] = x.r; });
+  allNoteRows_().forEach((x) => { if (canSee_(who, x.r)) notes[x.r[C.id]] = x.r; });
   const results = [];
   // 제목에서 찾기
   Object.keys(notes).forEach((id) => {
@@ -556,7 +600,7 @@ function removeNote_(req, who) {
     if (who.role !== 'owner' && note.r[C.owner] !== who.owner) throw new Error('지울 수 없는 노트입니다.');
     trash_(note.r[C.file]);
     if (note.r[C.pdf]) trash_(fileIdFromUrl_(note.r[C.pdf]));
-    notesSheet_().deleteRow(note.row);
+    note.sh.deleteRow(note.row);
     const tsh = textSheet_();
     const trows = rows_(tsh).filter((x) => x.r[0] === req.id);
     for (let i = trows.length - 1; i >= 0; i--) tsh.deleteRow(trows[i].row);
@@ -696,7 +740,7 @@ function runCheck_(id) {
   try {
     const cur = findNote_(id); // 그사이 줄 위치가 바뀌었을 수 있다
     if (!cur) return { checked: false };
-    const sh = notesSheet_();
+    const sh = cur.sh;
     sh.getRange(cur.row, C.check + 1).setValue(check);
     if (draft !== null) {
       const oldDraft = String(cell_(cur.r, C.ai));
@@ -870,7 +914,7 @@ function giveBack_(req, who) {
   lock.waitLock(30000);
   try {
     const note = findNote_(req.id);
-    const sh = notesSheet_();
+    const sh = note.sh;
     if (req.feedback !== undefined) sh.getRange(note.row, C.feedback + 1).setValue(String(req.feedback).slice(0, 45000));
     if (Array.isArray(req.scores)) writeScores_(sh, note.row, req.scores.slice(0, 20));
     if (fileId) {
@@ -900,9 +944,11 @@ function aiSheet_() {
     if (!String(sh.getRange(5, 1).getValue())) {
       sh.getRange(5, 1, 1, 3).setValues([['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임']]);
     }
-    // 예전 탭에는 '워크스페이스 ID' 줄이 없다 → 6줄에 넣고 안내를 한 줄 아래로 다시 쓴다
-    if (String(sh.getRange(6, 1).getValue()) !== '워크스페이스 ID') {
-      sh.getRange(6, 1, 1, 3).setValues([['워크스페이스 ID', '', '← Claude 개인 키(sk-ant-usr…)만: 키가 작업 공간을 고르지 않았다면 wrkspc_…를 넣으세요']]);
+    // 안내가 예전 것이면 새 안내로 바꾼다. 예전 탭에는 '워크스페이스 ID' 줄이 없으니 6줄에 넣는다 (넣어 둔 값은 지키기)
+    if (String(sh.getRange(7, 3).getValue()) !== AI_GUIDE_VER) {
+      const hasWs = String(sh.getRange(6, 1).getValue()) === '워크스페이스 ID';
+      const ws = hasWs ? sh.getRange(6, 2).getValue() : '';
+      sh.getRange(6, 1, 1, 3).setValues([['워크스페이스 ID', ws, '← Claude 개인 키(sk-ant-usr…)만: 키가 작업 공간을 고르지 않았다면 wrkspc_…를 넣으세요']]);
       writeAiGuide_(sh);
     }
     return sh;
@@ -935,7 +981,7 @@ function aiSheet_() {
 // 'AI 설정' 탭 7줄부터: 키 받는 방법
 function writeAiGuide_(sh) {
   const rows = [
-    ['AI 키 받는 방법', '셋 중 하나만 넣으면 됩니다. 키 모양을 보고 앱이 알아서 고릅니다.', ''],
+    ['AI 키 받는 방법', '셋 중 하나만 넣으면 됩니다. 키 모양을 보고 앱이 알아서 고릅니다.', AI_GUIDE_VER],
     ['구글 Gemini (무료)', 'aistudio.google.com/apikey → [Create API key] → AIza…로 시작하는 키 복사', '이 시트와 같은 구글 계정으로'],
     ['ChatGPT (유료)', 'platform.openai.com/api-keys → [Create new secret key] → sk-…로 시작하는 키 복사', 'Billing에서 금액을 충전해야 씁니다'],
     ['Claude (유료)', 'console.anthropic.com → API Keys → [Create Key] (작업 공간 하나를 고르면 편함) → sk-ant-…로 시작하는 키 복사', 'Billing에서 금액을 충전해야 씁니다'],
@@ -945,7 +991,7 @@ function writeAiGuide_(sh) {
     ['•', 'ChatGPT Plus·Claude Pro 같은 월 구독과 API 키는 따로입니다. API 키는 쓴 만큼 요금이 나갑니다.', ''],
     ['•', '무료 Gemini는 사용량을 넘으면 잠시 뒤 다시 됩니다. 무료로 쓰면 구글이 내용을 서비스 개선에 쓸 수 있습니다.', ''],
     ['•', '학생 답안 그림이 AI 회사로 보내집니다. 학교 지침을 확인하세요.', ''],
-    ['•', "AI 결과는 '노트' 탭 [AI 피드백 초안] 칸에 들어갑니다. 고쳐서 [선생님 피드백] 칸에 쓰면 학생에게 갑니다.", ''],
+    ['•', "AI 결과는 '학생 제출' 탭 [AI 피드백 초안] 칸에 들어갑니다. 고쳐서 [선생님 피드백] 칸에 쓰면 학생에게 갑니다.", ''],
     ['•', "루브릭은 앱에서 과제를 내줄 때 정합니다. '과제' 탭 [루브릭] 칸에서도 고칠 수 있습니다. (한 줄에 하나: 기준 | 배점 | 잘함: … / 보통: … / 부족: …)", ''],
     ['•', '모델 칸을 비우면 Gemini는 gemini-flash-latest, ChatGPT는 gpt-5-mini, Claude는 claude-sonnet-5-5를 씁니다.', ''],
   ];
@@ -1080,13 +1126,13 @@ function AI연결시험() {
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
 }
 
-// '노트' 탭에서 고른 줄들의 낱말 확인·AI 초안을 다시 만든다
+// '학생 제출' 탭에서 고른 줄들의 낱말 확인·AI 초안을 다시 만든다
 function AI초안만들기() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getActiveSheet();
   let msg;
   if (sh.getName() !== NOTES_SHEET) {
-    msg = "'노트' 탭에서 검사할 학생 줄을 고른 뒤 다시 누르세요.";
+    msg = "'학생 제출' 탭에서 검사할 학생 줄을 고른 뒤 다시 누르세요.";
   } else {
     const range = sh.getActiveRange();
     const ids = sh.getRange(range.getRow(), 1, range.getNumRows(), 1).getValues().map((r) => r[0]).filter(String);
@@ -1101,6 +1147,7 @@ function AI초안만들기() {
 function 설치확인() {
   const st = settings_();
   notesSheet_();
+  mineSheet_();
   textSheet_();
   taskSheet_();
   aiSheet_();

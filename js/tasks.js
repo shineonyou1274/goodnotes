@@ -136,16 +136,20 @@ export function buildWorksheet({ title, questions, style = 'lines', length = 'mi
   const nLines = { short: 2, mid: 4, long: 7 }[length] || 4;
   const boxH = { short: 80, mid: 150, long: 270 }[length] || 150;
   const gap = 38;
-  questions.forEach((q, i) => {
-    const qt = text(M, y, W - 2 * M, 19, `${i + 1}. ${q}`);
+  let num = 0;
+  questions.forEach((q) => {
+    // '#'으로 시작하는 줄은 번호·답 칸 없는 안내문 (예: # 다음 빈칸에 알맞은 말을 쓰시오.)
+    const isGuide = q.startsWith('#');
+    const qt = isGuide ? text(M, y, W - 2 * M, 19, q.replace(/^#+\s*/, ''), true) : text(M, y, W - 2 * M, 19, `${++num}. ${q}`);
     const th = measureTextHeight(ctx, qt);
-    const area = style === 'box' ? boxH : gap * nLines + 10;
+    const area = isGuide || length === 'none' ? 0 : style === 'box' ? boxH : gap * nLines + 10;
     if (y + th + 10 + area > H - 50 && page.items.length > 0 && y > 100) {
       newSheet();
       qt.y = y;
     }
     page.items.push(qt);
     const ya = qt.y + th + 10;
+    if (!area) { y = ya + (isGuide ? 6 : 24); return; }
     if (style === 'box') page.items.push(box(M, ya, W - 2 * M, boxH));
     else for (let k = 1; k <= nLines; k++) page.items.push(line(M + 14, ya + gap * k, W - M, ya + gap * k));
     y = ya + area + 30;
@@ -160,7 +164,7 @@ export async function worksheetDialog(app) {
   let style = 'lines', length = 'mid';
   let extra = { answers: [], keywords: [], rubric: [] };
   const title = h('input', { class: 'input', type: 'text', placeholder: '예: 3단원 확인 문제' });
-  const qs = h('textarea', { class: 'input qs-box', placeholder: '한 줄에 문제 하나씩\n예: 광합성에 필요한 세 가지를 쓰시오.\n예: 잎이 초록색인 까닭을 설명하시오.' });
+  const qs = h('textarea', { class: 'input qs-box', placeholder: '한 줄에 문제 하나씩\n# 다음 빈칸에 알맞은 말을 쓰시오.\nIf I ___ (be) you, I would accept it.\nI wish I ___ (have) a car.' });
   const nameChk = h('input', { type: 'checkbox', checked: true });
   const aiBtn = owner ? h('button', {
     class: 'btn small', onclick: async () => {
@@ -179,9 +183,9 @@ export async function worksheetDialog(app) {
       qs),
     field('답 쓰는 곳', h('div', { class: 'two-col' },
       seg([['lines', '줄'], ['box', '네모 칸']], style, (v) => { style = v; }),
-      seg([['short', '짧게'], ['mid', '보통'], ['long', '길게']], length, (v) => { length = v; }))),
+      seg([['none', '없음'], ['short', '짧게'], ['mid', '보통'], ['long', '길게']], length, (v) => { length = v; }))),
     h('label', { class: 'check-row' }, nameChk, ' 위에 이름 칸 넣기'),
-    h('p', { class: 'muted small' }, '만든 뒤에 펜·글상자·사진으로 자유롭게 고칠 수 있습니다. PDF 활동지는 “가져오기”로 불러오세요.'));
+    h('p', { class: 'muted small' }, h('b', {}, '#'), '으로 시작하는 줄은 번호·답 칸 없는 안내문이 됩니다. 사진을 넣을 자리가 필요하면 답 쓰는 곳을 ', h('b', {}, '없음'), '으로 하세요.'));
   for (;;) {
     const ok = await dialog({ title: '문제지 만들기', body, buttons: [{ label: '취소', value: false }, { label: '만들기', value: true, primary: true }] });
     if (!ok) return;
@@ -269,7 +273,7 @@ export async function assignDialog(nbId) {
         body: h('ol', { class: 'guide-list' },
           h('li', {}, '학생 앱 맨 위 ', h('b', {}, '받은 과제'), '에 나타납니다.'),
           h('li', {}, '제출 현황은 시트 ', h('b', {}, '과제'), ' 탭, 답안은 ', h('b', {}, '노트'), ' 탭에서 봅니다.'),
-          h('li', {}, '피드백은 노트 탭 ', h('b', {}, '선생님 피드백'), ' 칸에 쓰거나, 앱에서 학생 노트를 열어 ', h('b', {}, '돌려주기'), '를 누르세요.')),
+          h('li', {}, '피드백은 시트 학생 제출 탭 ', h('b', {}, '선생님 피드백'), ' 칸에 쓰거나, 앱에서 학생 노트를 열어 ', h('b', {}, '돌려주기'), '를 누르세요.')),
       });
       return true;
     } catch (e) {
