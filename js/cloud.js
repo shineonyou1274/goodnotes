@@ -170,10 +170,12 @@ export async function assignNotebook(nbId, { classes, due, keywords, rubric, cri
   for (const [i, p] of pages.entries()) {
     onProgress(`문제지 준비 중… ${i + 1} / ${pages.length}`);
     await ensurePageImages(p);
-    const c = renderPageCanvas(p, Math.min(2, 1600 / p.w));
+    // 동영상은 그림으로 굳히지 않고 그대로 둬서 학생도 재생할 수 있게 한다
+    const videos = p.items.filter((it) => it.type === 'video');
+    const c = renderPageCanvas({ ...p, items: p.items.filter((it) => it.type !== 'video') }, Math.min(2, 1600 / p.w));
     const bg = await canvasJpeg(c, 0.85);
     c.width = c.height = 0;
-    flat.push({ ...p, bg, items: [], template: 'blank' });
+    flat.push({ ...p, bg, items: videos, template: 'blank' });
   }
   onProgress('반에 내주는 중…');
   const tnb = { ...nb, taskId: nb.id };

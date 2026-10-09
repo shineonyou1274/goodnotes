@@ -175,6 +175,18 @@ export class NoteView {
     return { x: (sx - this.ox) / this.zoom - r.x, y: (sy - this.oy) / this.zoom - r.y };
   }
 
+  // 화면의 점 s 아래에 있는 동영상 (맨 위의 것)
+  videoAt(s) {
+    const page = this.pageAtWorld((s.x - this.ox) / this.zoom, (s.y - this.oy) / this.zoom);
+    if (!page) return null;
+    const l = this.toLocal(page, s.x, s.y);
+    for (let i = page.items.length - 1; i >= 0; i--) {
+      const it = page.items[i];
+      if (it.type === 'video' && l.x >= it.x && l.x <= it.x + it.w && l.y >= it.y && l.y <= it.y + it.h) return it;
+    }
+    return null;
+  }
+
   toScreen(page, x, y) {
     const r = this.pos.get(page.id);
     return { x: this.ox + (r.x + x) * this.zoom, y: this.oy + (r.y + y) * this.zoom };
@@ -378,7 +390,7 @@ export class NoteView {
     const sel = this.selection;
     if (!sel) return;
     const before = sel.page.items;
-    const after = before.map((it) => (sel.ids.has(it.id) && it.type !== 'image' ? { ...it, color } : it));
+    const after = before.map((it) => (sel.ids.has(it.id) && it.type !== 'image' && it.type !== 'video' ? { ...it, color } : it));
     this.commit(sel.page, before, after);
   }
 
@@ -519,7 +531,7 @@ export class NoteView {
 
     if (type === 'touch') {
       this.touches.set(e.pointerId, { x: s.x, y: s.y, sx: s.x, sy: s.y });
-      if (this.touches.size === 1) this.tap = { t0: now(), max: 1, moved: false };
+      if (this.touches.size === 1) this.tap = { t0: now(), max: 1, moved: false, s };
       else if (this.tap) this.tap.max = Math.max(this.tap.max, this.touches.size);
       if (this.action) {
         if (this.action.pointerType === 'touch' && this.action.canCancel()) {
@@ -595,6 +607,11 @@ export class NoteView {
         const tap = this.tap;
         this.tap = null;
         if (!tap.moved && now() - tap.t0 < 350 && !cancelled) {
+          if (tap.max === 1 && !this.host.fingerDraws()) {
+            // 손가락으로 동영상을 톡 누르면 재생한다
+            const v = this.videoAt(tap.s);
+            if (v) this.host.onPlayVideo?.(v);
+          }
           if (tap.max === 2) this.host.onUndoGesture?.();
           else if (tap.max === 3) this.host.onRedoGesture?.();
         }
@@ -711,6 +728,11 @@ export class NoteView {
       return;
     } else {
       this.clearSelection();
+      // 펜·글상자로 동영상을 누르면 재생한다 (옮기거나 지우려면 올가미로 고른다)
+      if (tool !== 'eraser') {
+        const v = this.videoAt(s);
+        if (v) { this.swallow = e.pointerId; this.host.onPlayVideo?.(v); return; }
+      }
       if (tool === 'pen' || tool === 'highlighter') action = new StrokeAction(this, page, tool, e, s);
       else if (tool === 'eraser') action = new EraseAction(this, page, e, s);
       else if (tool === 'text') action = new TextAction(this, page, e, s);

@@ -11,12 +11,18 @@ async function encodeItem(it) {
   if (it.type === 'image') {
     return { ...it, blob: it.blob ? await blobToDataURL(it.blob) : null };
   }
+  if (it.type === 'video') {
+    return { ...it, blob: it.blob ? await blobToDataURL(it.blob) : null, poster: it.poster ? await blobToDataURL(it.poster) : null };
+  }
   return { ...it };
 }
 
 async function decodeItem(it) {
   if (it.type === 'stroke') return { ...it, id: uid(), pts: new Float32Array(it.pts) };
   if (it.type === 'image') return { ...it, id: uid(), blob: it.blob ? await dataURLToBlob(it.blob) : null };
+  if (it.type === 'video') {
+    return { ...it, id: uid(), blob: it.blob ? await dataURLToBlob(it.blob) : null, poster: it.poster ? await dataURLToBlob(it.poster) : null };
+  }
   return { ...it, id: uid() };
 }
 

@@ -47,7 +47,10 @@ export function loadImage(blob) {
 export async function ensurePageImages(page) {
   const blobs = [];
   if (page.bg) blobs.push(page.bg);
-  for (const it of page.items) if (it.type === 'image' && it.blob) blobs.push(it.blob);
+  for (const it of page.items) {
+    if (it.type === 'image' && it.blob) blobs.push(it.blob);
+    if (it.type === 'video' && it.poster) blobs.push(it.poster);
+  }
   await Promise.all(blobs.map(loadImage));
 }
 
@@ -178,6 +181,7 @@ export function measureTextHeight(ctx, item) {
 export function drawItem(ctx, item) {
   if (item.type === 'stroke') drawStroke(ctx, item);
   else if (item.type === 'text') drawText(ctx, item);
+  else if (item.type === 'video') drawVideo(ctx, item);
   else if (item.type === 'image') {
     const img = getImage(item.blob);
     if (img) ctx.drawImage(img, item.x, item.y, item.w, item.h);
@@ -186,6 +190,40 @@ export function drawItem(ctx, item) {
       ctx.fillRect(item.x, item.y, item.w, item.h);
     }
   }
+}
+
+function fmtTime(sec) {
+  if (!(sec > 0) || !isFinite(sec)) return '';
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// 동영상: 첫 장면 그림 위에 재생 단추
+function drawVideo(ctx, item) {
+  const img = item.poster ? getImage(item.poster) : null;
+  ctx.save();
+  if (img) ctx.drawImage(img, item.x, item.y, item.w, item.h);
+  else { ctx.fillStyle = '#2b2d33'; ctx.fillRect(item.x, item.y, item.w, item.h); }
+  const r = Math.max(16, Math.min(40, Math.min(item.w, item.h) * 0.16));
+  const cx = item.x + item.w / 2, cy = item.y + item.h / 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.32, cy - r * 0.48); ctx.lineTo(cx + r * 0.52, cy); ctx.lineTo(cx - r * 0.32, cy + r * 0.48);
+  ctx.closePath(); ctx.fill();
+  const t = fmtTime(item.duration);
+  if (t) {
+    const fs = Math.max(10, Math.min(16, item.h * 0.07));
+    ctx.font = `600 ${fs}px ${FONT_STACK}`;
+    const tw = ctx.measureText(t).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(item.x + item.w - tw - fs * 1.1, item.y + item.h - fs * 1.7, tw + fs * 0.8, fs * 1.4);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(t, item.x + item.w - tw - fs * 0.7, item.y + item.h - fs);
+  }
+  ctx.restore();
 }
 
 export function drawItems(ctx, items, { skip, visible } = {}) {

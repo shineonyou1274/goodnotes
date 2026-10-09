@@ -77,6 +77,7 @@ export class Editor {
       onPenDetected: () => this.penDetected(),
       onUndoGesture: () => this.undo(),
       onRedoGesture: () => this.redo(),
+      onPlayVideo: (item) => playVideo(item),
     });
     this.view.setPages(this.pages, { keepView: false });
     if (this.nb.lastPage) {
@@ -198,7 +199,7 @@ export class Editor {
         onclick: () => this.setTool(id),
       }));
     }
-    tools.append(h('button', { class: 'tool-btn', title: '사진 넣기', 'aria-label': '사진 넣기', html: icons.image, onclick: () => this.insertImage() }));
+    tools.append(h('button', { class: 'tool-btn', title: '사진·동영상 넣기', 'aria-label': '사진·동영상 넣기', html: icons.image, onclick: () => this.insertImage() }));
     tb.append(tools, h('div', { class: 'tb-sep' }));
 
     const tool = s.tool;
@@ -624,8 +625,9 @@ export class Editor {
 
   /* ---------- 사진 ---------- */
   async insertImage() {
-    const file = await pickFile('image/*');
+    const file = await pickFile('image/*,video/*');
     if (!file) return;
+    if (file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)) { await this.insertVideo(file); return; }
     try {
       const img = await loadImage(file);
       if (!img) throw new Error();
@@ -640,6 +642,25 @@ export class Editor {
     } catch {
       toast('사진을 열 수 없습니다');
     }
+  }
+
+  async insertVideo(file) {
+    if (file.size > VIDEO_MAX_MB * 1024 * 1024) {
+      toast(`동영상이 너무 큽니다 (${Math.round(file.size / 1048576)}MB). ${VIDEO_MAX_MB}MB까지 넣을 수 있어요. 짧게 잘라서 넣어 주세요.`, 5000);
+      return;
+    }
+    progress('동영상 넣는 중…');
+    const info = await videoPoster(file);
+    progress(null);
+    const page = this.view.currentPage;
+    const maxW = page.w * 0.6, maxH = page.h * 0.4;
+    const k = Math.min(maxW / info.w, maxH / info.h);
+    const blob = new Blob([file], { type: file.type || 'video/mp4' });
+    const item = { type: 'video', id: uid(), x: 0, y: 0, w: info.w * k, h: info.h * k, blob, poster: info.poster, duration: info.duration };
+    if (info.poster) await loadImage(info.poster);
+    this.setTool('lasso');
+    this.view.placeItems([item], page);
+    toast('동영상을 넣었습니다. 누르면 재생됩니다. 옮길 때는 올가미로 고르세요.', 3500);
   }
 
   /* ---------- 더 보기 메뉴 ---------- */
@@ -760,6 +781,44 @@ function dotSize(tool, w) {
 }
 
 // 너무 큰 사진은 줄여서 저장한다
+const VIDEO_MAX_MB = 20;
+
+// 동영상의 첫 장면을 그림으로 만든다 (실패하면 poster 없이)
+async function videoPoster(file) {
+  const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
+  const out = { w: 640, h: 360, poster: null, duration: 0 };
+  try {
+    await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = rej; setTimeout(rej, 10000); });
+    out.duration = isFinite(v.duration) ? v.duration : 0;
+    if (v.videoWidth) { out.w = v.videoWidth; out.h = v.videoHeight; }
+    v.currentTime = Math.min(0.5, (out.duration || 1) / 3);
+    await new Promise((res) => { v.onseeked = res; setTimeout(res, 2500); });
+    const k = Math.min(1, 960 / out.w);
+    const c = document.createElement('canvas');
+    c.width = Math.round(out.w * k); c.height = Math.round(out.h * k);
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    out.poster = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
+  } catch { /* 첫 장면 없이 넣는다 */ }
+  URL.revokeObjectURL(url);
+  v.removeAttribute('src');
+  return out;
+}
+
+// 화면 가득 동영상 재생
+function playVideo(item) {
+  if (!item.blob) { toast('동영상 파일이 없습니다'); return; }
+  const url = URL.createObjectURL(item.blob);
+  const close = () => { back.remove(); URL.revokeObjectURL(url); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const video = h('video', { class: 'video-player', src: url, controls: true, autoplay: true, playsinline: true });
+  const back = h('div', { class: 'video-back', onclick: (e) => { if (e.target === back) close(); } },
+    video, h('button', { class: 'video-close', 'aria-label': '닫기', onclick: close }, '✕'));
+  document.body.append(back);
+  document.addEventListener('keydown', onKey);
+}
+
 async function shrinkImage(file, img) {
   const max = 2000;
   if (Math.max(img.width, img.height) <= max && file.size < 1.5e6) return file;
