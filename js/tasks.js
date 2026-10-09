@@ -397,7 +397,16 @@ function markSeen(m) {
 // 서재 맨 위에 받은 과제와 피드백을 그린다
 export async function renderStudentTasks(lib, container) {
   let res;
-  try { res = await listTasks(); } catch { container.classList.add('hidden'); return; }
+  try { res = await listTasks(); } catch (e) {
+    // 숨기지 않고 다시 시도할 수 있게 한다
+    container.innerHTML = '';
+    container.classList.remove('hidden');
+    container.append(h('div', { class: 'task-head' }, '받은 과제'),
+      h('div', { class: 'muted small' }, '과제를 불러오지 못했어요. ',
+        h('button', { class: 'btn small', onclick: () => renderStudentTasks(lib, container) }, '다시 불러오기')));
+    console.warn(e);
+    return;
+  }
   const local = await db.getAllNotebooks();
   const seen = seenMap();
   const mine = res.mine || [];

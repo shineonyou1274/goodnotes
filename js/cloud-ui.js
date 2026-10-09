@@ -20,7 +20,10 @@ export async function connectDialog(prefill = {}) {
   const url = h('input', { class: 'input', type: 'url', placeholder: 'https://script.google.com/macros/s/…/exec', value: prefill.url || '' });
   const key = h('input', { class: 'input', type: 'password', placeholder: '시트 “설정” 탭의 관리자 비밀번호', value: '' });
   const code = h('input', { class: 'input', type: 'text', placeholder: '선생님이 알려 준 수업 코드', value: prefill.classCode || '' });
-  const name = h('input', { class: 'input', type: 'text', placeholder: '예: 10213 김하늘', value: prefill.name || '' });
+  // 학번과 이름을 따로 받아 '10213 김하늘' 모양으로 맞춘다 (시트에서 학번 순으로 정리되게)
+  const nm = String(prefill.name || '').trim().match(/^(\d+)\s+(.+)$/);
+  const stNo = h('input', { class: 'input', type: 'text', inputmode: 'numeric', placeholder: '예: 10213', value: nm ? nm[1] : '' });
+  const name = h('input', { class: 'input', type: 'text', placeholder: '예: 김하늘', value: nm ? nm[2] : prefill.name || '' });
   const body = h('div', { class: 'form' });
   const draw = () => {
     body.innerHTML = '';
@@ -36,13 +39,13 @@ export async function connectDialog(prefill = {}) {
         mode === 'owner' ? ' · ' : null,
         mode === 'owner' ? h('a', { href: GUIDE_URL, target: '_blank', rel: 'noopener' }, '주소를 만드는 방법 보기') : null)),
       mode === 'owner' ? field('관리자 비밀번호', key) : field('수업 코드', code),
-      mode === 'student' ? field('이름 (학번과 함께 쓰면 좋아요)', name) : null];
+      mode === 'student' ? h('div', { class: 'two-col name-row' }, field('학번', stNo), field('이름', name)) : null];
     body.append(...parts.filter(Boolean));
   };
   draw();
   for (;;) {
     // 링크로 주소가 이미 들어와 있으면 비밀번호(또는 이름) 칸부터 쓰게 한다
-    if (prefill.url) setTimeout(() => (mode === 'owner' ? key : name).focus(), 120);
+    if (prefill.url) setTimeout(() => (mode === 'owner' ? key : stNo).focus(), 120);
     const ok = await dialog({
       title: '클라우드 연결',
       body,
@@ -51,9 +54,14 @@ export async function connectDialog(prefill = {}) {
     if (!ok) return null;
     const cfg = mode === 'owner'
       ? { mode, url: url.value.trim(), key: key.value }
-      : { mode, url: url.value.trim(), classCode: code.value.trim(), name: name.value.trim(), token: prefill.token || newToken() };
+      : {
+        mode, url: url.value.trim(), classCode: code.value.trim(),
+        name: `${stNo.value.replace(/\D/g, '')} ${name.value.trim().replace(/\s+/g, ' ')}`.trim(),
+        token: prefill.token || newToken(),
+      };
     if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(cfg.url)) { toast('웹 앱 주소는 https://script.google.com/ 으로 시작해야 합니다', 3500); continue; }
-    if (mode === 'student' && !cfg.name) { toast('이름을 입력하세요'); continue; }
+    if (mode === 'student' && !/^\d+$/.test(stNo.value.trim())) { toast('학번을 숫자로 쓰세요 (예: 10213)'); stNo.focus(); continue; }
+    if (mode === 'student' && !name.value.trim()) { toast('이름을 쓰세요'); name.focus(); continue; }
     try {
       progress('연결 확인 중…');
       const info = await ping(cfg);
@@ -76,7 +84,7 @@ function studentGuide(cfg) {
   return dialog({
     title: `${cfg.className || '수업'}에 참여했어요`,
     body: h('ol', { class: 'guide-list' },
-      h('li', {}, h('b', {}, '+ 새 노트'), '를 만들어 펜으로 쓰세요.'),
+      h('li', {}, '맨 위 ', h('b', {}, '받은 과제'), '를 눌러 쓰세요. (과제가 없으면 ', h('b', {}, '+ 새 노트'), ')'),
       h('li', {}, '다 쓰면 위쪽의 ', h('b', {}, '제출하기'), '를 한 번 누르세요.'),
       h('li', {}, h('b', {}, '제출됨 ✓'), '이 보이면 끝! 고쳐 쓰면 다시 ', h('b', {}, '제출하기'), '가 됩니다.')),
     buttons: [{ label: '알겠어요', value: true, primary: true }],

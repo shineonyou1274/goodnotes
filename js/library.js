@@ -46,14 +46,27 @@ export class Library {
     this.el.append(header, this.results, this.tasksEl, this.grid);
     container.append(this.el);
     await this.load();
+    // 학생: 선생님이 새 과제를 내면 따로 누르지 않아도 뜨도록 가끔 다시 확인한다
+    this._refreshTasks = () => {
+      if (document.visibilityState === 'visible' && getCloud()?.mode === 'student') renderStudentTasks(this, this.tasksEl);
+    };
+    this._taskTimer = setInterval(this._refreshTasks, 60000);
+    document.addEventListener('visibilitychange', this._refreshTasks);
     if (this.app.pendingJoin) {
       const j = this.app.pendingJoin;
       this.app.pendingJoin = null;
-      if (await connectDialog(j)) await runSync(this);
+      if (await connectDialog(j)) {
+        await this.load(); // 받은 과제를 바로 보여 준다
+        await runSync(this);
+      }
     }
   }
 
-  destroy() { this.el?.remove(); }
+  destroy() {
+    clearInterval(this._taskTimer);
+    document.removeEventListener('visibilitychange', this._refreshTasks);
+    this.el?.remove();
+  }
 
   async load() {
     if (!this.el) return;
