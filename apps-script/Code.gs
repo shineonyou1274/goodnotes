@@ -900,8 +900,11 @@ function aiSheet_() {
     if (!String(sh.getRange(5, 1).getValue())) {
       sh.getRange(5, 1, 1, 3).setValues([['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임']]);
     }
-    // 예전 안내(Gemini·Claude만)는 새 안내(ChatGPT 포함)로 바꾼다
-    if (String(sh.getRange(8, 1).getValue()).indexOf('ChatGPT') < 0) writeAiGuide_(sh);
+    // 예전 탭에는 '워크스페이스 ID' 줄이 없다 → 6줄에 넣고 안내를 한 줄 아래로 다시 쓴다
+    if (String(sh.getRange(6, 1).getValue()) !== '워크스페이스 ID') {
+      sh.getRange(6, 1, 1, 3).setValues([['워크스페이스 ID', '', '← Claude 개인 키(sk-ant-usr…)만: 키가 작업 공간을 고르지 않았다면 wrkspc_…를 넣으세요']]);
+      writeAiGuide_(sh);
+    }
     return sh;
   }
   sh = ss.insertSheet(AI_SHEET);
@@ -911,12 +914,13 @@ function aiSheet_() {
     ['AI에게 부탁', '학생 눈높이에 맞게 친절하게. 잘한 점 1가지, 고칠 점 1~2가지. 5문장 이내.', '← 자유롭게 고치세요'],
     ['모델', '', '← 비워 두면 자동'],
     ['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임'],
+    ['워크스페이스 ID', '', '← Claude 개인 키(sk-ant-usr…)만: 키가 작업 공간을 고르지 않았다면 wrkspc_…를 넣으세요'],
   ];
   sh.getRange(1, 1, rows.length, 3).setValues(rows);
   writeAiGuide_(sh);
-  sh.getRange(1, 1, 5, 1).setFontWeight('bold');
+  sh.getRange(1, 1, 6, 1).setFontWeight('bold');
   sh.getRange(1, 2, 1, 1).setBackground('#fff6d6');
-  sh.getRange(1, 3, 5, 1).setFontColor('#6e6e73');
+  sh.getRange(1, 3, 6, 1).setFontColor('#6e6e73');
   sh.setColumnWidth(1, 130);
   sh.setColumnWidth(2, 460);
   sh.setColumnWidth(3, 420);
@@ -928,13 +932,13 @@ function aiSheet_() {
   return sh;
 }
 
-// 'AI 설정' 탭 6줄부터: 키 받는 방법
+// 'AI 설정' 탭 7줄부터: 키 받는 방법
 function writeAiGuide_(sh) {
   const rows = [
     ['AI 키 받는 방법', '셋 중 하나만 넣으면 됩니다. 키 모양을 보고 앱이 알아서 고릅니다.', ''],
     ['구글 Gemini (무료)', 'aistudio.google.com/apikey → [Create API key] → AIza…로 시작하는 키 복사', '이 시트와 같은 구글 계정으로'],
     ['ChatGPT (유료)', 'platform.openai.com/api-keys → [Create new secret key] → sk-…로 시작하는 키 복사', 'Billing에서 금액을 충전해야 씁니다'],
-    ['Claude (유료)', 'console.anthropic.com → API Keys → [Create Key] → sk-ant-…로 시작하는 키 복사', 'Billing에서 금액을 충전해야 씁니다'],
+    ['Claude (유료)', 'console.anthropic.com → API Keys → [Create Key] (작업 공간 하나를 고르면 편함) → sk-ant-…로 시작하는 키 복사', 'Billing에서 금액을 충전해야 씁니다'],
     ['확인', "키를 B1 칸에 붙여 넣고 시트 메뉴 [노트 앱 → AI 연결 시험]. '성공'이 뜨면 끝!", ''],
     ['', '', ''],
     ['알아 두기', '', ''],
@@ -945,17 +949,18 @@ function writeAiGuide_(sh) {
     ['•', "루브릭은 앱에서 과제를 내줄 때 정합니다. '과제' 탭 [루브릭] 칸에서도 고칠 수 있습니다. (한 줄에 하나: 기준 | 배점 | 잘함: … / 보통: … / 부족: …)", ''],
     ['•', '모델 칸을 비우면 Gemini는 gemini-flash-latest, ChatGPT는 gpt-5-mini, Claude는 claude-sonnet-5-5를 씁니다.', ''],
   ];
-  sh.getRange(6, 1, 20, 3).setValues(Array.from({ length: 20 }, (_, i) => rows[i] || ['', '', '']));
-  sh.getRange(6, 1, 20, 3).setFontWeight('normal').setFontColor('#1c1c1e');
-  sh.getRange(6, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
-  sh.getRange(7, 1, 4, 1).setFontWeight('bold');
-  sh.getRange(7, 3, 4, 1).setFontColor('#6e6e73');
-  sh.getRange(12, 1).setFontWeight('bold');
+  sh.getRange(7, 1, 20, 3).setValues(Array.from({ length: 20 }, (_, i) => rows[i] || ['', '', '']));
+  sh.getRange(7, 1, 20, 3).setFontWeight('normal').setFontColor('#1c1c1e');
+  sh.getRange(7, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
+  sh.getRange(8, 1, 4, 1).setFontWeight('bold');
+  sh.getRange(8, 3, 4, 1).setFontColor('#6e6e73');
+  sh.getRange(13, 1).setFontWeight('bold');
 }
 
 function aiSettings_() {
-  const v = aiSheet_().getRange(1, 2, 5, 1).getValues();
+  const v = aiSheet_().getRange(1, 2, 6, 1).getValues();
   return {
+    workspace: String(v[5][0] || '').replace(/\s/g, ''),
     showScore: String(v[4][0]).trim() === '예',
     // 복사할 때 딸려 온 띄어쓰기·따옴표·보이지 않는 글자를 뺀다
     key: String(v[0][0] || '').replace(/[\s'"`\u200B-\u200D\uFEFF]/g, ''),
@@ -983,6 +988,8 @@ function askAI_(ai, prompt, opt) {
   } else if (claude) {
     url = 'https://api.anthropic.com/v1/messages';
     headers = { 'x-api-key': ai.key, 'anthropic-version': '2023-06-01' };
+    // 개인 키(sk-ant-usr…)가 작업 공간을 고르지 않았으면 작업 공간 ID를 함께 보내야 한다
+    if (/^wrkspc_/.test(ai.workspace)) headers['anthropic-workspace-id'] = ai.workspace;
     const content = [];
     if (opt.pdf) content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: opt.pdf } });
     content.push({ type: 'text', text: prompt });
@@ -1009,6 +1016,9 @@ function askAI_(ai, prompt, opt) {
       const msg = String((json.error && json.error.message) || res.getContentText()).slice(0, 200);
       const who = providerName_(ai) + ' (' + code + ') ';
       // 원래 오류 문장도 함께 보여 줘야 무엇이 문제인지 알 수 있다
+      if (/anthropic-workspace-id|workspace/i.test(msg)) {
+        throw new Error(who + "이 키는 작업 공간(Workspace)을 정해야 합니다. ① console.anthropic.com → Settings → Workspaces의 ID 칸에서 wrkspc_…를 복사해 'AI 설정' 탭 B6 칸에 넣거나, ② 키를 새로 만들 때 작업 공간 하나를 고르세요. [" + msg + ']');
+      }
       if (code === 429) throw new Error(who + '사용량 한도에 걸렸습니다. 잠시 뒤 다시 해 주세요. [' + msg + ']');
       if (/credit|billing|quota|balance/i.test(msg)) throw new Error(who + '요금 잔액이 없습니다. 키를 만든 사이트의 Billing에서 충전해 주세요. [' + msg + ']');
       if (code === 404 || /model/i.test(msg) && /not.?found|does not exist|invalid/i.test(msg)) throw new Error(who + "모델 이름이 맞지 않습니다. 'AI 설정' 탭 B4(모델) 칸을 비워 보세요. [" + msg + ']');
