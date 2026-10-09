@@ -16,6 +16,11 @@
     .tab { flex: 1; height: 52px; border-radius: 14px; font-size: 18px; font-weight: 700; background: var(--surface-2); color: var(--muted); }
     .tab.on.t { background: #3a6df0; color: #fff; }
     .tab.on.s { background: #14a39a; color: #fff; }
+    .tab.on.a { background: #8a5cf6; color: #fff; }
+    .arch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
+    .arch div { border-radius: 12px; padding: 10px; text-align: center; background: var(--surface-2); font-size: 14px; }
+    .arch b { display: block; font-size: 15px; margin-bottom: 2px; }
+    @media (max-width: 480px) { .arch { grid-template-columns: 1fr; } }
     .pane { display: none; }
     .pane.on { display: block; }
     .item { display: flex; gap: 14px; padding: 16px; margin: 12px 0; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); }
@@ -62,6 +67,7 @@
   <div class="tabs">
     <button class="tab t on" data-p="teacher">👩‍🏫 선생님</button>
     <button class="tab s" data-p="student">🧑‍🎓 학생</button>
+    <button class="tab a" data-p="about">💡 앱 소개</button>
   </div>
 
   <!-- 선생님 -->
@@ -162,6 +168,49 @@
       </div>
     </div>
   </section>
+
+  <!-- 앱 소개 -->
+  <section class="pane" id="about">
+    <div class="item">
+      <div class="ic">🧩</div>
+      <div>
+        <h3>어떻게 돌아가나요</h3>
+        <div class="arch">
+          <div><b>📒 필기 앱</b>GitHub Pages<br><span class="muted">공책</span></div>
+          <div><b>🧑‍💼 Apps Script</b>시트에 붙은 코드<br><span class="muted">조교</span></div>
+          <div><b>🗂️ 시트·드라이브</b>선생님 계정<br><span class="muted">서류함</span></div>
+        </div>
+        <p class="muted">앱은 웹 주소로 열고, 노트는 먼저 기기에 저장한 뒤 선생님의 구글 드라이브로 올라갑니다. 서버·저장소 비용은 0원입니다.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">🔍</div>
+      <div>
+        <h3>손글씨 읽기(OCR)는 구글 드라이브 기능</h3>
+        <p>제출한 페이지를 그림으로 만들어 드라이브에서 <b>구글 문서로 변환</b>하면, 구글이 글자를 읽어 줍니다. 읽은 글자로 <b>손글씨 검색</b>과 <b>핵심 낱말 확인</b>을 합니다.</p>
+        <p class="muted">무료이고 따로 가입할 것이 없지만, 흘려 쓴 글씨나 수식은 약합니다. 그래서 채점과 피드백은 AI가 답안 그림을 직접 보고 합니다.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="ic">⭐</div>
+      <div>
+        <h3>좋은 점</h3>
+        <p>💰 무료 (AI만 선택) · 🔒 학생 자료는 선생님 드라이브에만 · 🙋 학생은 가입 없이 링크로 · 📶 인터넷이 끊겨도 필기 · 📱 아이패드·갤럭시·PC 모두</p>
+      </div>
+    </div>
+
+    <div class="item start">
+      <div class="ic">🎁</div>
+      <div>
+        <h3>다른 선생님께 나눠 주기</h3>
+        <p>이 안내서 주소와 아래 시트 사본 링크만 보내면 됩니다. 사본에는 코드가 이미 들어 있습니다.</p>
+        <div class="flow"><a class="k blue" href="https://docs.google.com/spreadsheets/d/1dbyp8onZGANhQ9fFD7u6Ys5B6yqYXWivmlG9nRIkYgI/copy" target="_blank" rel="noopener">시트 사본 만들기</a>
+          <button class="k" id="share-guide">안내서 주소 복사</button></div>
+      </div>
+    </div>
+  </section>
 </main>
 <script>
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => {
@@ -169,6 +218,11 @@
     document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === b.dataset.p));
   }));
   if (location.hash === '#student') document.querySelector('.tab.s').click();
+  if (location.hash === '#about') document.querySelector('.tab.a').click();
+  document.getElementById('share-guide').addEventListener('click', async (e) => {
+    const url = location.href.split('#')[0];
+    try { await navigator.clipboard.writeText(url); e.target.textContent = '복사됨 ✓'; } catch { e.target.textContent = url; }
+  });
   let code = '';
   fetch('apps-script/Code.gs').then((r) => r.text()).then((t) => { code = t; document.getElementById('code').textContent = t; });
   document.getElementById('copy').addEventListener('click', async (e) => {
