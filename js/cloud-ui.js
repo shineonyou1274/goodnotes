@@ -6,6 +6,7 @@ import {
   inviteLink, deviceLink,
 } from './cloud.js';
 import { h, toast, progress, dialog, confirmDialog, formatDate } from './util.js';
+import { giveBackDialog } from './tasks.js';
 
 const GUIDE_URL = 'setup.html';
 
@@ -161,13 +162,17 @@ export async function cloudPanel(app, lib) {
     const all = (await listRemote()).sort((a, b) => (a.mine === b.mine ? 0 : a.mine ? -1 : 1)
       || ko(a.cls, b.cls) || ko(a.name, b.name) || b.updatedAt - a.updatedAt);
     const classes = [...new Set(all.filter((n) => !n.mine && n.cls).map((n) => n.cls))];
-    if (cfg.mode === 'owner' && classes.length > 1) {
+    const tasks = [...new Set(all.filter((n) => !n.mine && n.task).map((n) => n.task))];
+    if (cfg.mode === 'owner' && (classes.length > 1 || tasks.length)) {
       filter.classList.remove('hidden');
-      filter.append(h('option', { value: '' }, '모든 반'), ...classes.map((c) => h('option', { value: c }, c)));
+      filter.append(h('option', { value: '' }, '모든 노트'),
+        ...(classes.length > 1 ? classes.map((c) => h('option', { value: 'c:' + c }, c)) : []),
+        ...tasks.map((t) => h('option', { value: 't:' + t }, `과제: ${t}`)));
       filter.addEventListener('change', () => renderList());
     }
     const renderList = () => {
-      const notes = filter.value ? all.filter((n) => n.cls === filter.value) : all;
+      const f = filter.value;
+      const notes = !f ? all : all.filter((n) => (f.startsWith('c:') ? n.cls === f.slice(2) : n.task === f.slice(2)));
       list.innerHTML = '';
       if (!notes.length) list.append(h('div', { class: 'muted' }, '아직 올라간 노트가 없습니다.'));
       let lastGroup = null;
@@ -180,8 +185,10 @@ export async function cloudPanel(app, lib) {
         list.append(h('div', { class: 'remote-row' },
           h('div', { class: 'remote-text' },
             h('div', { class: 'strong ellipsis' }, n.title),
-            h('div', { class: 'muted small' }, `${formatDate(n.updatedAt)} · ${n.pages}쪽`)),
+            h('div', { class: 'muted small' }, [formatDate(n.updatedAt), `${n.pages}쪽`, n.check ? `낱말 ${n.check}` : '', n.feedback || n.returned ? '피드백 ✓' : '']
+              .filter(Boolean).join(' · '))),
           h('button', { class: 'btn small', onclick: () => { closeFn(); openRemoteNote(app, n); } }, '열기'),
+          cfg.mode === 'owner' && !n.mine ? h('button', { class: 'btn small', onclick: () => giveBackDialog(n) }, '피드백') : null,
           n.pdf ? h('a', { class: 'btn small', href: n.pdf, target: '_blank', rel: 'noopener' }, 'PDF') : null,
           cfg.mode === 'owner' || n.mine ? h('button', {
             class: 'mini-btn', 'aria-label': '클라우드에서 삭제', html: icons.trash, onclick: async (e) => {

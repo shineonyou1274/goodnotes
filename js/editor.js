@@ -8,6 +8,7 @@ import { saveSettings, PEN_PALETTE, HIGHLIGHTER_PALETTE } from './settings.js';
 import { exportPdf, pdfToPages } from './pdf.js';
 import { exportBackup } from './backup.js';
 import { getCloud, shouldSync, needsSync, uploadNotebook } from './cloud.js';
+import { assignDialog, giveBackDialog } from './tasks.js';
 import {
   h, toast, progress, dialog, confirmDialog, promptDialog, popover, menu, closePopovers,
   saveFile, pickFile, safeFileName,
@@ -94,16 +95,40 @@ export class Editor {
   }
 
   // 학생: 선생님께 제출하는 버튼 (노트를 닫아도 자동으로 제출된다)
+  // 선생님: 학생 노트에는 '돌려주기', 문제지에는 '과제로 내주기'
   makeSubmitBtn() {
     const cfg = getCloud();
+    if (cfg?.mode === 'owner' && this.nb.remoteId) {
+      return h('button', { class: 'submit-btn', onclick: () => this.giveBack() }, '돌려주기');
+    }
+    if (cfg?.mode === 'owner' && this.nb.worksheet) {
+      return h('button', { class: 'submit-btn', onclick: () => this.assign() }, this.nb.taskInfo?.assignedAt ? '다시 내주기' : '과제로 내주기');
+    }
     if (!cfg || cfg.mode !== 'student' || !shouldSync(this.nb, cfg)) return null;
+    this.isSubmit = true;
     const btn = h('button', { class: 'submit-btn', onclick: () => this.submit() }, '제출하기');
-    db.getNotebook(this.nb.id).then((cur) => this.setSubmitted(cur && !needsSync(cur, cfg) && cur.syncedAt));
+    db.getNotebook(this.nb.id).then((cur) => this.setSubmitted(cur && !cur.fresh && !needsSync(cur, cfg) && cur.syncedAt));
     return btn;
   }
 
+  async giveBack() {
+    this.view.endTextEdit();
+    await this.flush();
+    await giveBackDialog({ id: this.nb.remoteId, title: this.nb.title, name: this.nb.remoteName }, this.nb);
+  }
+
+  async assign() {
+    this.view.endTextEdit();
+    await this.flush();
+    if (await assignDialog(this.nb.id)) {
+      const cur = await db.getNotebook(this.nb.id);
+      this.nb.taskInfo = cur.taskInfo;
+      if (this.submitBtn) this.submitBtn.textContent = '다시 내주기';
+    }
+  }
+
   setSubmitted(done) {
-    if (!this.submitBtn) return;
+    if (!this.submitBtn || !this.isSubmit) return;
     this.submitBtn.textContent = done ? '제출됨 ✓' : '제출하기';
     this.submitBtn.classList.toggle('done', !!done);
   }
@@ -114,6 +139,7 @@ export class Editor {
     this.view.endTextEdit();
     try {
       await this.flush();
+      if ((await db.getNotebook(this.nb.id))?.fresh) { toast('답을 먼저 쓰고 제출하세요'); return; }
       progress('선생님께 제출하는 중…');
       const sent = await uploadNotebook(this.nb.id, (m) => progress(m));
       progress(null);
@@ -349,7 +375,7 @@ export class Editor {
       if (pages.length) await db.putPages(pages);
       if (nbChanged || pages.length) {
         // 내용이 바뀐 때만 '수정 시각'을 바꾼다 (그래야 클라우드에 다시 올릴 노트를 알 수 있다)
-        if (this.contentChanged || pages.length) this.nb.updatedAt = Date.now();
+        if (this.contentChanged || pages.length) { this.nb.updatedAt = Date.now(); delete this.nb.fresh; }
         this.contentChanged = false;
         this.nb.pageIds = this.pages.map((p) => p.id);
         // 그사이 클라우드 동기화가 적어 둔 값은 지우지 않는다
@@ -634,6 +660,7 @@ export class Editor {
       '-',
       { label: 'PDF로 내보내기', icon: icons.pdf, action: () => this.exportPdf() },
       { label: '백업 파일로 내보내기', icon: icons.download, action: () => this.exportBackup() },
+      getCloud()?.mode === 'owner' && !this.nb.remoteId ? { label: '과제로 내주기', icon: icons.upload, action: () => this.assign() } : null,
       '-',
       toggle('fingerDraw', '손가락으로 그리기'),
       toggle('pressure', '필압 사용 (펜)'),

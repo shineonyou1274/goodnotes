@@ -678,3 +678,38 @@ a.btn { text-decoration: none; color: inherit; }
 @media (prefers-color-scheme: dark) { .submit-btn.done { color: #5fd17f; } }
 .guide-list { padding-left: 20px; margin: 0; line-height: 1.9; font-size: 16px; }
 .guide-list b { color: var(--accent); }
+
+/* ---------- 과제 ---------- */
+.tasks { margin: 12px calc(20px + var(--safe-right)) 0 calc(20px + var(--safe-left)); }
+.task-head { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+.task-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.task-card {
+  flex: none;
+  width: 180px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.task-card.new { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.task-title { font-weight: 600; font-size: 15px; }
+.task-meta { display: flex; justify-content: space-between; gap: 6px; margin-top: 6px; font-size: 13px; }
+.task-status { font-weight: 600; }
+.task-card.todo .task-status { color: var(--accent); }
+.task-card.wait .task-status { color: #b26b00; }
+.task-card.done .task-status { color: #1f8a3e; }
+.task-card.fb .task-status { color: #d9668f; }
+.qs-box { height: 150px; padding: 10px; line-height: 1.5; resize: vertical; }
+.rubric-box { height: 90px; padding: 10px; line-height: 1.5; resize: vertical; }
+.feedback-box { height: 170px; padding: 10px; line-height: 1.6; resize: vertical; margin-top: 8px; }
+.feedback-text { white-space: pre-wrap; line-height: 1.7; font-size: 16px; max-height: 50vh; overflow-y: auto; }
+.label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.check-row { display: flex; align-items: center; gap: 6px; font-size: 15px; padding: 4px 0; }
+.check-row input { width: 18px; height: 18px; }
+.check-list { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.check-line { font-size: 14px; }
+@media (prefers-color-scheme: dark) {
+  .task-card.done .task-status { color: #5fd17f; }
+  .task-card.wait .task-status { color: #ffb84d; }
+}

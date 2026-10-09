@@ -63,6 +63,10 @@ export const ping = (cfg) => call('ping', { selfUrl: cfg?.url }, cfg);
 export const listRemote = () => call('list').then((d) => d.notes || []);
 export const searchRemote = (q) => call('search', { q }).then((d) => d.results || []);
 export const removeRemote = (id) => call('remove', { id });
+export const listTasks = () => call('tasks');
+export const noteInfo = (id) => call('noteInfo', { id });
+export const giveBack = (id, feedback, data) => call('giveBack', { id, feedback, data });
+export const aiQuestions = (opts) => call('aiQuestions', opts);
 
 // 이 노트를 클라우드에 올릴지
 export function shouldSync(nb, cfg = getCloud()) {
@@ -71,7 +75,8 @@ export function shouldSync(nb, cfg = getCloud()) {
 }
 
 export function needsSync(nb, cfg = getCloud()) {
-  return shouldSync(nb, cfg) && (nb.syncedAt || 0) < nb.updatedAt;
+  // fresh: 받기만 하고 아직 쓰지 않은 과제는 제출하지 않는다
+  return shouldSync(nb, cfg) && !nb.fresh && (nb.syncedAt || 0) < nb.updatedAt;
 }
 
 async function loadPages(nb) {
@@ -118,7 +123,7 @@ async function doUpload(nbId, onProgress) {
   const data = await (await exportBackup(nb, pages)).text();
   const pdf = await blobToBase64(await exportPdf(pages, null, { maxScale: 1.4, quality: 0.72 }));
   await call('upload', {
-    meta: { id: nb.id, title: nb.title, updatedAt: version, pages: pages.length, pageIds: pages.map((p) => p.id) },
+    meta: { id: nb.id, title: nb.title, updatedAt: version, pages: pages.length, pageIds: pages.map((p) => p.id), taskId: nb.taskId || '' },
     data,
     pdf,
   });
@@ -146,7 +151,70 @@ async function doUpload(nbId, onProgress) {
     cur.syncedAt = version;
     await db.putNotebook(cur);
   }
+  // 과제 답안이면 서버가 낱말·AI 검사를 한다 (기다리지 않는다)
+  if (nb.taskId) call('check', { id: nb.id }).catch((e) => console.warn('검사 실패', e));
   return true;
+}
+
+function canvasJpeg(c, q) {
+  return new Promise((r) => c.toBlob(r, 'image/jpeg', q));
+}
+
+// 선생님: 문제지를 과제로 내준다. 학생이 지우지 못하도록 페이지를 그림 한 장으로 굳혀서 보낸다.
+export async function assignNotebook(nbId, { classes, due, keywords, rubric }, onProgress = () => {}) {
+  const nb = await db.getNotebook(nbId);
+  const pages = await loadPages(nb);
+  const flat = [];
+  for (const [i, p] of pages.entries()) {
+    onProgress(`문제지 준비 중… ${i + 1} / ${pages.length}`);
+    await ensurePageImages(p);
+    const c = renderPageCanvas(p, Math.min(2, 1600 / p.w));
+    const bg = await canvasJpeg(c, 0.85);
+    c.width = c.height = 0;
+    flat.push({ ...p, bg, items: [], template: 'blank' });
+  }
+  onProgress('반에 내주는 중…');
+  const tnb = { ...nb, taskId: nb.id };
+  delete tnb.taskInfo;
+  const data = await (await exportBackup(tnb, flat)).text();
+  await call('assign', { meta: { id: nb.id, title: nb.title, classes, due, keywords, rubric }, data });
+  const cur = await db.getNotebook(nbId);
+  cur.taskInfo = { ...(cur.taskInfo || {}), classes, due, keywords, rubric, assignedAt: Date.now() };
+  await db.putNotebook(cur);
+}
+
+// 학생: 과제를 받아 내 노트로 만든다 (이미 있으면 그 노트)
+export async function startTask(task) {
+  const local = (await db.getAllNotebooks()).find((n) => n.taskId === task.id && !n.returnOf);
+  if (local) return local;
+  const res = await call('getTask', { id: task.id });
+  const { nb, pages } = await importBackup(res.data);
+  nb.taskId = task.id;
+  nb.title = res.title || task.title;
+  nb.createdAt = nb.updatedAt = Date.now();
+  nb.syncedAt = 0;
+  nb.fresh = true;
+  delete nb.taskInfo;
+  delete nb.worksheet;
+  await db.putNotebookWithPages(nb, pages);
+  return nb;
+}
+
+// 학생: 선생님이 첨삭한 노트를 받는다 (이미 받은 것은 새것으로 바꾼다)
+export async function openReturn(item) {
+  const res = await call('getReturn', { id: item.noteId });
+  const { nb, pages } = await importBackup(res.data);
+  const old = (await db.getAllNotebooks()).find((n) => n.returnOf === item.noteId);
+  if (old) await db.deleteNotebook(old.id);
+  nb.title = `✏ 첨삭: ${item.title}`;
+  nb.returnOf = item.noteId;
+  nb.cloud = false;
+  delete nb.remoteId;
+  delete nb.remoteName;
+  delete nb.taskId;
+  nb.createdAt = nb.updatedAt = Date.now();
+  await db.putNotebookWithPages(nb, pages);
+  return nb;
 }
 
 // 서버의 노트를 기기로 가져온다. asCopy이면 학생 노트를 보기용 사본으로 저장한다.

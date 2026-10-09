@@ -5,8 +5,9 @@
  *  - 노트를 구글 드라이브에 저장하고, 구글 시트에 목록을 적는다.
  *  - 페이지 그림을 드라이브의 글자 인식(OCR)으로 읽어 시트에 적고, 손글씨 검색에 쓴다.
  *  - 관리자(나)는 모든 노트를 보고, 학생은 자기 노트만 올리고 내려받는다.
+ *  - 과제(문제지)를 반에 나눠 주고, 제출한 답안을 낱말·AI로 미리 검사해 피드백을 돌려준다.
  *
- * 이 코드는 고칠 필요가 없습니다. 비밀번호와 반 목록은 시트의 '설정' 탭에서 바꿉니다.
+ * 이 코드는 고칠 필요가 없습니다. 비밀번호와 반 목록은 '설정' 탭, AI 키는 'AI 설정' 탭에서 바꿉니다.
  * 설치 방법: https://shineonyou1274.github.io/goodnotes/setup.html
  */
 
@@ -16,9 +17,18 @@ const CLASS_START_ROW = 6; // '설정' 탭에서 반 목록이 시작하는 줄
 const ROOT_FOLDER = '노트 앱 저장소';
 const NOTES_SHEET = '노트';
 const TEXT_SHEET = '페이지 글자';
-const NOTE_HEADERS = ['노트 ID', '제목', '반', '이름', '소유자', '수정 시각', '쪽 수', '노트 파일', 'PDF', '인식된 글자'];
+const TASK_SHEET = '과제';
+const AI_SHEET = 'AI 설정';
+const NOTE_HEADERS = ['노트 ID', '제목', '반', '이름', '소유자', '수정 시각', '쪽 수', '노트 파일', 'PDF', '인식된 글자',
+  '과제', '과제 ID', '낱말 확인', 'AI 피드백 초안', '선생님 피드백', '첨삭 노트'];
 const TEXT_HEADERS = ['노트 ID', '쪽', '페이지 ID', '인식된 글자', '인식 시각'];
-const C = { id: 0, title: 1, cls: 2, name: 3, owner: 4, updated: 5, pages: 6, file: 7, pdf: 8, text: 9 };
+const TASK_HEADERS = ['과제 ID', '제목', '반', '마감', '핵심 낱말', '모범 답안·채점 기준', '제출', '과제 파일', '내준 시각'];
+const C = {
+  id: 0, title: 1, cls: 2, name: 3, owner: 4, updated: 5, pages: 6, file: 7, pdf: 8, text: 9,
+  task: 10, taskId: 11, check: 12, ai: 13, feedback: 14, ret: 15,
+};
+const T = { id: 0, title: 1, cls: 2, due: 3, keys: 4, rubric: 5, count: 6, file: 7, created: 8 };
+const ALL_CLASSES = '모든 반';
 
 function doGet() {
   return out_({ ok: true, app: 'goodnotes-web', message: '노트 앱 서버가 동작 중입니다.' });
@@ -54,6 +64,14 @@ const ACTIONS = {
   download: downloadNote_,
   search: searchText_,
   remove: removeNote_,
+  tasks: listTasks_,
+  getTask: getTask_,
+  assign: assignTask_,
+  check: checkNote_,
+  noteInfo: noteInfo_,
+  giveBack: giveBack_,
+  getReturn: getReturn_,
+  aiQuestions: aiQuestions_,
 };
 
 /* ---------- 권한 ---------- */
@@ -191,6 +209,8 @@ function refreshLinks_(fromApp) {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('노트 앱')
     .addItem('초대 링크 만들기', '초대링크만들기')
+    .addItem('AI 초안 만들기 (고른 줄)', 'AI초안만들기')
+    .addItem('AI 연결 시험', 'AI연결시험')
     .addItem('설치 확인', '설치확인')
     .addToUi();
 }
@@ -217,6 +237,10 @@ function hash_(s) {
   return Utilities.base64EncodeWebSafe(d).slice(0, 22);
 }
 
+function ownerOnly_(who) {
+  if (who.role !== 'owner') throw new Error('선생님만 할 수 있습니다.');
+}
+
 function canSee_(who, row) {
   return who.role === 'owner' || row[C.owner] === who.owner;
 }
@@ -239,8 +263,23 @@ function sheet_(name, headers) {
   return sh;
 }
 
-function notesSheet_() { return sheet_(NOTES_SHEET, NOTE_HEADERS); }
+function notesSheet_() {
+  const sh = sheet_(NOTES_SHEET, NOTE_HEADERS);
+  // 예전 시트에는 과제·피드백 칸이 없으니 제목 줄을 늘린다
+  if (sh.getLastColumn() < NOTE_HEADERS.length) {
+    sh.getRange(1, 1, 1, NOTE_HEADERS.length).setValues([NOTE_HEADERS]);
+    sh.getRange(1, 1, 1, NOTE_HEADERS.length).setFontWeight('bold').setBackground('#eef2fd');
+    sh.getRange(1, C.feedback + 1).setBackground('#fff6d6');
+  }
+  return sh;
+}
 function textSheet_() { return sheet_(TEXT_SHEET, TEXT_HEADERS); }
+function taskSheet_() { return sheet_(TASK_SHEET, TASK_HEADERS); }
+
+function cell_(row, i) {
+  const v = row[i];
+  return v === undefined || v === null ? '' : v;
+}
 
 function rows_(sh) {
   const last = sh.getLastRow();
@@ -292,6 +331,10 @@ function listNotes_(req, who) {
       updatedAt: Number(x.r[C.updated]) || 0,
       pages: Number(x.r[C.pages]) || 0,
       pdf: who.role === 'owner' ? x.r[C.pdf] : '',
+      task: cell_(x.r, C.task),
+      feedback: !!String(cell_(x.r, C.feedback)).trim(),
+      returned: !!cell_(x.r, C.ret),
+      check: who.role === 'owner' ? String(cell_(x.r, C.check)) : '',
     }));
   return { notes: notes };
 }
@@ -324,10 +367,11 @@ function uploadNote_(req, who) {
       sh.deleteRow(dups[i].row);
     }
     const cur = findNote_(meta.id);
+    const task = meta.taskId ? findTask_(String(meta.taskId)) : null;
     const values = [
       meta.id, String(meta.title || '제목 없음'), who.cls, who.role === 'owner' ? '관리자' : who.name, who.owner,
       Number(meta.updatedAt) || Date.now(), Number(meta.pages) || 0, dataFile.getId(), pdfUrl,
-      cur ? cur.r[C.text] : '',
+      cur ? cur.r[C.text] : '', task ? task.r[T.title] : '', task ? task.r[T.id] : '',
     ];
     if (cur) {
       trash_(cur.r[C.file]);
@@ -514,11 +558,339 @@ function removeNote_(req, who) {
   return {};
 }
 
+/* ---------- 과제 ---------- */
+function findTask_(id) {
+  if (!id) return null;
+  return rows_(taskSheet_()).find((x) => String(x.r[T.id]) === String(id)) || null;
+}
+
+function taskClasses_(row) {
+  return String(row[T.cls] || '').split(',').map((s) => s.trim()).filter(String);
+}
+
+function taskVisible_(who, row) {
+  if (who.role === 'owner') return true;
+  const list = taskClasses_(row);
+  return !list.length || list.indexOf(ALL_CLASSES) >= 0 || list.indexOf(who.cls) >= 0;
+}
+
+function dateText_(v) {
+  if (!v) return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    const p = (n) => (n < 10 ? '0' : '') + n;
+    return v.getFullYear() + '-' + p(v.getMonth() + 1) + '-' + p(v.getDate());
+  }
+  return String(v);
+}
+
+function splitKeys_(s) {
+  return String(s || '').split(/[,，\n]/).map((k) => k.trim()).filter(String);
+}
+
+// 선생님: 문제지를 과제로 내준다 (같은 노트를 다시 내주면 고쳐 쓴다)
+function assignTask_(req, who) {
+  ownerOnly_(who);
+  const m = req.meta || {};
+  if (!m.id || typeof req.data !== 'string') throw new Error('내줄 문제지가 없습니다.');
+  const title = String(m.title || '과제').slice(0, 100);
+  const file = folder_(['과제']).createFile(Utilities.newBlob(req.data, 'application/json', cleanName_(title) + '.gnote'));
+  const classes = (m.classes || []).map(String).filter(String);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sh = taskSheet_();
+    const cur = findTask_(m.id);
+    const row = cur ? cur.row : sh.getLastRow() + 1;
+    if (cur) trash_(cur.r[T.file]);
+    sh.getRange(row, 1, 1, TASK_HEADERS.length).setValues([[
+      String(m.id), title, classes.length ? classes.join(', ') : ALL_CLASSES, String(m.due || ''),
+      String(m.keywords || ''), String(m.rubric || ''),
+      '=COUNTIF(\'' + NOTES_SHEET + '\'!L:L,A' + row + ')&"명"', file.getId(), new Date(),
+    ]]);
+  } finally {
+    SpreadsheetApp.flush();
+    lock.releaseLock();
+  }
+  return {};
+}
+
+// 과제 목록. 학생에게는 내 반 과제와 내 노트의 피드백을 함께 알려 준다
+function listTasks_(req, who) {
+  const tasks = rows_(taskSheet_())
+    .filter((x) => x.r[T.id] && taskVisible_(who, x.r))
+    .map((x) => ({ id: String(x.r[T.id]), title: x.r[T.title], cls: x.r[T.cls], due: dateText_(x.r[T.due]) }));
+  const mine = who.role === 'owner' ? [] : rows_(notesSheet_())
+    .filter((x) => x.r[C.owner] === who.owner && (cell_(x.r, C.taskId) || String(cell_(x.r, C.feedback)).trim() || cell_(x.r, C.ret)))
+    .map((x) => ({
+      noteId: x.r[C.id], title: x.r[C.title], taskId: String(cell_(x.r, C.taskId)),
+      feedback: String(cell_(x.r, C.feedback)).trim(), returned: String(cell_(x.r, C.ret)),
+      updatedAt: Number(x.r[C.updated]) || 0,
+    }));
+  return { tasks: tasks, mine: mine };
+}
+
+function getTask_(req, who) {
+  const t = findTask_(req.id);
+  if (!t || !taskVisible_(who, t.r)) throw new Error('과제를 찾을 수 없습니다.');
+  const data = DriveApp.getFileById(t.r[T.file]).getBlob().getDataAsString('UTF-8');
+  return { data: data, title: t.r[T.title], due: dateText_(t.r[T.due]) };
+}
+
+/* ---------- 검사·피드백 ---------- */
+// 제출한 노트를 검사한다: 핵심 낱말 확인, (AI 키가 있으면) AI 피드백 초안
+function checkNote_(req, who) {
+  const note = findNote_(req.id);
+  if (!note || !canSee_(who, note.r)) throw new Error('노트를 찾을 수 없습니다.');
+  return runCheck_(req.id);
+}
+
+function runCheck_(id) {
+  const note = findNote_(id);
+  const task = note ? findTask_(cell_(note.r, C.taskId)) : null;
+  if (!note || !task) return { checked: false };
+  const keys = splitKeys_(task.r[T.keys]);
+  let check = '';
+  if (keys.length) {
+    const flat = norm_(note.r[C.text]);
+    const hit = keys.filter((k) => flat.indexOf(norm_(k)) >= 0);
+    const miss = keys.filter((k) => hit.indexOf(k) < 0);
+    check = hit.length + '/' + keys.length + (miss.length ? ' · 빠짐: ' + miss.join(', ') : ' · 모두 있음');
+  }
+  const ai = aiSettings_();
+  let draft = null;
+  if (ai.key) {
+    try { draft = aiFeedback_(note, task, ai); } catch (e) { draft = 'AI 실패: ' + e.message; }
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const cur = findNote_(id); // 그사이 줄 위치가 바뀌었을 수 있다
+    if (!cur) return { checked: false };
+    const sh = notesSheet_();
+    sh.getRange(cur.row, C.check + 1).setValue(check);
+    if (draft !== null) {
+      const oldDraft = String(cell_(cur.r, C.ai));
+      const oldFeedback = String(cell_(cur.r, C.feedback)).trim();
+      sh.getRange(cur.row, C.ai + 1).setValue(draft);
+      // '바로 돌려주기'이면 선생님이 직접 쓴 피드백이 없을 때만 AI 피드백을 그대로 보낸다
+      if (ai.autoReturn && draft.indexOf('AI 실패') !== 0 && (!oldFeedback || oldFeedback === oldDraft.trim())) {
+        sh.getRange(cur.row, C.feedback + 1).setValue(draft);
+      }
+    }
+  } finally {
+    SpreadsheetApp.flush();
+    lock.releaseLock();
+  }
+  return { checked: true };
+}
+
+function aiFeedback_(note, task, ai) {
+  const pdfId = fileIdFromUrl_(note.r[C.pdf]);
+  if (!pdfId) throw new Error('답안 PDF가 없습니다.');
+  const pdf = Utilities.base64Encode(DriveApp.getFileById(pdfId).getBlob().getBytes());
+  const prompt = [
+    '너는 한국 학교 선생님을 돕는 조교다. 첨부한 PDF는 학생이 문제지(활동지)에 손으로 답을 쓴 것이다.',
+    '인쇄된 글자는 문제이고, 손글씨가 학생의 답이다.',
+    '과제: ' + task.r[T.title],
+    task.r[T.rubric] ? '모범 답안·채점 기준:\n' + task.r[T.rubric] : '',
+    task.r[T.keys] ? '꼭 들어가야 할 낱말: ' + task.r[T.keys] : '',
+    '선생님의 부탁: ' + ai.ask,
+    '학생에게 돌려줄 피드백을 한국어로 써라. 문제 번호별로 맞았는지와 고칠 점을 짧게 쓰고, 마지막에 격려 한 줄.',
+    '학생 이름은 쓰지 말고, 마크다운 기호(#, *, **)는 쓰지 마라.',
+  ].filter(String).join('\n');
+  return askAI_(ai, prompt, { pdf: pdf });
+}
+
+// 선생님: 노트의 검사 결과와 피드백 보기 (돌려주기 창에 채운다)
+function noteInfo_(req, who) {
+  ownerOnly_(who);
+  const note = findNote_(req.id);
+  if (!note) throw new Error('노트를 찾을 수 없습니다.');
+  return {
+    task: cell_(note.r, C.task), check: String(cell_(note.r, C.check)), ai: String(cell_(note.r, C.ai)),
+    feedback: String(cell_(note.r, C.feedback)), returned: !!cell_(note.r, C.ret),
+  };
+}
+
+// 선생님: 피드백 글과 (있으면) 펜으로 첨삭한 노트를 학생에게 돌려준다
+function giveBack_(req, who) {
+  ownerOnly_(who);
+  if (!findNote_(req.id)) throw new Error('노트를 찾을 수 없습니다.');
+  let fileId = '';
+  if (typeof req.data === 'string' && req.data) {
+    fileId = folder_(['첨삭']).createFile(Utilities.newBlob(req.data, 'application/json', 'feedback.gnote')).getId();
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const note = findNote_(req.id);
+    const sh = notesSheet_();
+    if (req.feedback !== undefined) sh.getRange(note.row, C.feedback + 1).setValue(String(req.feedback).slice(0, 45000));
+    if (fileId) {
+      trash_(cell_(note.r, C.ret));
+      sh.getRange(note.row, C.ret + 1).setValue(fileId);
+    }
+  } finally {
+    SpreadsheetApp.flush();
+    lock.releaseLock();
+  }
+  return {};
+}
+
+// 학생: 선생님이 첨삭한 노트 받기
+function getReturn_(req, who) {
+  const note = findNote_(req.id);
+  if (!note || !canSee_(who, note.r) || !cell_(note.r, C.ret)) throw new Error('첨삭한 노트가 없습니다.');
+  return { data: DriveApp.getFileById(note.r[C.ret]).getBlob().getDataAsString('UTF-8') };
+}
+
+/* ---------- AI ---------- */
+function aiSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(AI_SHEET);
+  if (sh) return sh;
+  sh = ss.insertSheet(AI_SHEET);
+  const rows = [
+    ['AI 키', '', '← 아래 방법으로 받은 키를 붙여 넣으세요. 비워 두면 AI를 쓰지 않습니다'],
+    ['바로 돌려주기', '아니오', '← 예: AI 피드백이 바로 학생에게 감 / 아니오: 선생님이 보고 고친 뒤 돌려줌'],
+    ['AI에게 부탁', '학생 눈높이에 맞게 친절하게. 잘한 점 1가지, 고칠 점 1~2가지. 5문장 이내.', '← 자유롭게 고치세요'],
+    ['모델', '', '← 비워 두면 자동'],
+    ['', '', ''],
+    ['AI 키 받는 방법', '(무료 · 구글 Gemini)', ''],
+    ['1', 'https://aistudio.google.com/apikey 열기', '이 시트와 같은 구글 계정으로'],
+    ['2', '[Create API key] (API 키 만들기) 누르기', ''],
+    ['3', 'AIza로 시작하는 키를 복사해 위 B1 칸에 붙여 넣기', ''],
+    ['4', '메뉴 [노트 앱 → AI 연결 시험]으로 확인. 끝!', ''],
+    ['', '', ''],
+    ['알아 두기', '', ''],
+    ['•', '무료 사용량을 넘으면 잠시 뒤 다시 됩니다. 무료로 쓰면 구글이 내용을 서비스 개선에 쓸 수 있습니다.', ''],
+    ['•', '학생 답안 그림이 AI 회사로 보내집니다. 학교 지침을 확인하세요.', ''],
+    ['•', 'Claude를 쓰려면 console.anthropic.com → API Keys에서 받은 키(sk-ant-…)를 넣으세요. (유료)', ''],
+    ['•', "AI 결과는 '노트' 탭 [AI 피드백 초안] 칸에 들어갑니다. 고쳐서 [선생님 피드백] 칸에 쓰면 학생에게 갑니다.", ''],
+  ];
+  sh.getRange(1, 1, rows.length, 3).setValues(rows);
+  sh.getRange(1, 1, 4, 1).setFontWeight('bold');
+  sh.getRange(1, 2, 1, 1).setBackground('#fff6d6');
+  sh.getRange(1, 3, 4, 1).setFontColor('#6e6e73');
+  sh.getRange(6, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
+  sh.getRange(12, 1).setFontWeight('bold');
+  sh.setColumnWidth(1, 130);
+  sh.setColumnWidth(2, 460);
+  sh.setColumnWidth(3, 420);
+  try {
+    sh.getRange(2, 2).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['예', '아니오']).build());
+  } catch (e) { /* 목록 상자는 없어도 된다 */ }
+  return sh;
+}
+
+function aiSettings_() {
+  const v = aiSheet_().getRange(1, 2, 4, 1).getValues();
+  return {
+    key: String(v[0][0] || '').trim(),
+    autoReturn: String(v[1][0]).trim() === '예',
+    ask: String(v[2][0] || '').trim() || '친절하게, 5문장 이내.',
+    model: String(v[3][0] || '').trim(),
+  };
+}
+
+// AI에게 묻는다. 키가 sk-ant-로 시작하면 Claude, 아니면 Gemini
+function askAI_(ai, prompt, opt) {
+  opt = opt || {};
+  if (!ai.key) throw new Error("'AI 설정' 탭에 AI 키를 넣어 주세요.");
+  const claude = /^sk-ant-/.test(ai.key);
+  let url, headers, body;
+  if (claude) {
+    url = 'https://api.anthropic.com/v1/messages';
+    headers = { 'x-api-key': ai.key, 'anthropic-version': '2023-06-01' };
+    const content = [];
+    if (opt.pdf) content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: opt.pdf } });
+    content.push({ type: 'text', text: prompt });
+    body = { model: ai.model || 'claude-sonnet-5-5', max_tokens: 2000, messages: [{ role: 'user', content: content }] };
+  } else {
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(ai.model || 'gemini-flash-latest') + ':generateContent';
+    headers = { 'x-goog-api-key': ai.key };
+    const parts = [];
+    if (opt.pdf) parts.push({ inline_data: { mime_type: 'application/pdf', data: opt.pdf } });
+    parts.push({ text: prompt });
+    body = { contents: [{ role: 'user', parts: parts }] };
+    if (opt.json) body.generationConfig = { responseMimeType: 'application/json' };
+  }
+  for (let attempt = 0; ; attempt++) {
+    const res = UrlFetchApp.fetch(url, {
+      method: 'post', contentType: 'application/json', headers: headers, payload: JSON.stringify(body), muteHttpExceptions: true,
+    });
+    const code = res.getResponseCode();
+    if ((code === 429 || code >= 500) && attempt < 1) { Utilities.sleep(15000); continue; }
+    let json = {};
+    try { json = JSON.parse(res.getContentText()); } catch (e) { json = {}; }
+    if (code >= 300) {
+      const msg = String((json.error && json.error.message) || res.getContentText()).slice(0, 200);
+      if (code === 429) throw new Error('AI 사용량 한도에 걸렸습니다. 잠시 뒤 다시 해 주세요.');
+      if (code === 401 || code === 403 || /api.?key|authentication/i.test(msg)) throw new Error("AI 키가 맞지 않습니다. 'AI 설정' 탭의 키를 확인하세요.");
+      throw new Error('AI 요청 실패 (' + code + '): ' + msg);
+    }
+    let text = '';
+    if (claude) {
+      text = (json.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+    } else {
+      const cand = (json.candidates || [])[0];
+      text = ((cand && cand.content && cand.content.parts) || []).map((p) => p.text || '').join('');
+    }
+    if (!text) throw new Error('AI가 답을 주지 않았습니다.');
+    return opt.json ? text : text.replace(/\*\*/g, '').replace(/^#+\s*/gm, '').trim();
+  }
+}
+
+// 선생님: AI로 문제 만들기
+function aiQuestions_(req, who) {
+  ownerOnly_(who);
+  const prompt = [
+    '너는 한국 학교 선생님을 돕는다. 아래 조건으로 학생 활동지 문제를 만들어라.',
+    '주제·단원: ' + String(req.topic || '').slice(0, 300),
+    '학년: ' + String(req.level || '').slice(0, 40),
+    '문항 수: ' + (Number(req.count) || 5),
+    '문제 유형: ' + String(req.kind || '서술형과 단답형 섞어서'),
+    '반드시 JSON 하나만 출력: {"questions":["문제", ...], "answers":["모범 답안", ...], "keywords":["채점 핵심 낱말", ...]}',
+    '문제 앞에 번호를 붙이지 마라. keywords는 3~8개.',
+  ].join('\n');
+  const text = askAI_(aiSettings_(), prompt, { json: true });
+  const m = text.match(/\{[\s\S]*\}/);
+  let data;
+  try { data = JSON.parse(m ? m[0] : text); } catch (e) { throw new Error('AI 답을 읽지 못했습니다. 다시 눌러 주세요.'); }
+  const list = (a) => (Array.isArray(a) ? a.map(String).filter(String) : []);
+  return { questions: list(data.questions), answers: list(data.answers), keywords: list(data.keywords) };
+}
+
+function AI연결시험() {
+  let msg;
+  try { msg = 'AI 연결 성공! 답: ' + askAI_(aiSettings_(), '“연결 성공”이라고만 답하세요.'); } catch (e) { msg = e.message; }
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
+}
+
+// '노트' 탭에서 고른 줄들의 낱말 확인·AI 초안을 다시 만든다
+function AI초안만들기() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getActiveSheet();
+  let msg;
+  if (sh.getName() !== NOTES_SHEET) {
+    msg = "'노트' 탭에서 검사할 학생 줄을 고른 뒤 다시 누르세요.";
+  } else {
+    const range = sh.getActiveRange();
+    const ids = sh.getRange(range.getRow(), 1, range.getNumRows(), 1).getValues().map((r) => r[0]).filter(String);
+    let n = 0;
+    ids.forEach((id) => { if (runCheck_(id).checked) n++; });
+    msg = n ? n + '개를 검사했습니다.' : '과제로 낸 노트가 아닙니다. (과제 ID 칸이 빈 줄)';
+  }
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
+}
+
 /* 설치 확인용: 편집기에서 이 함수를 한 번 실행하면 권한 승인과 시트·폴더 만들기가 끝납니다. */
 function 설치확인() {
   const st = settings_();
   notesSheet_();
   textSheet_();
+  taskSheet_();
+  aiSheet_();
   folder_([]);
   const blank = Utilities.newBlob(Utilities.base64Decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII='), 'image/png', 'test.png');

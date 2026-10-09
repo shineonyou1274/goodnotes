@@ -7,6 +7,7 @@ import { exportBackup, importBackup } from './backup.js';
 import { templatePreview } from './editor.js';
 import { getCloud, shouldSync, needsSync, removeRemote, rememberDeleted } from './cloud.js';
 import { connectDialog, cloudPanel, runSync, searchHandwriting } from './cloud-ui.js';
+import { worksheetDialog, assignDialog, renderStudentTasks } from './tasks.js';
 import {
   h, toast, progress, dialog, confirmDialog, promptDialog, menu, pickFile, saveFile, safeFileName, formatDate,
 } from './util.js';
@@ -40,8 +41,9 @@ export class Library {
       h('button', { class: 'btn', onclick: (e) => this.importMenu(e.currentTarget) }, h('span', { html: icons.upload }), h('span', { class: 'hide-sm' }, '가져오기')),
       h('button', { class: 'btn primary', onclick: () => this.createDialog() }, h('span', { html: icons.plus }), h('span', {}, '새 노트')));
     this.results = h('section', { class: 'search-results hidden' });
+    this.tasksEl = h('section', { class: 'tasks hidden' });
     this.grid = h('main', { class: 'grid' });
-    this.el.append(header, this.results, this.grid);
+    this.el.append(header, this.results, this.tasksEl, this.grid);
     container.append(this.el);
     await this.load();
     if (this.app.pendingJoin) {
@@ -56,14 +58,19 @@ export class Library {
   async load() {
     if (!this.el) return;
     this.notebooks = (await db.getAllNotebooks()).sort((a, b) => b.updatedAt - a.updatedAt);
-    this.cloudBtn.classList.toggle('connected', !!getCloud());
+    const cfg = getCloud();
+    this.cloudBtn.classList.toggle('connected', !!cfg);
     this.renderGrid();
+    if (cfg?.mode === 'student') renderStudentTasks(this, this.tasksEl);
+    else this.tasksEl.classList.add('hidden');
   }
 
   syncLabel(nb) {
     const cfg = getCloud();
     if (!cfg) return null;
     if (nb.remoteId) return h('span', { class: 'badge student' }, nb.remoteName || '학생');
+    if (nb.returnOf) return h('span', { class: 'badge student' }, '첨삭');
+    if (nb.fresh) return h('span', { class: 'badge wait' }, '새 과제');
     if (!shouldSync(nb, cfg)) return null;
     return needsSync(nb, cfg)
       ? h('span', { class: 'badge wait', title: '아직 올리지 않은 변경이 있습니다' }, '올릴 것 있음')
@@ -76,6 +83,11 @@ export class Library {
     const list = this.notebooks.filter((n) => !this.query || n.title.toLowerCase().includes(this.query));
     g.append(h('button', { class: 'card new-card', onclick: () => this.createDialog() },
       h('div', { class: 'cover new-cover', html: icons.plus }), h('div', { class: 'card-title' }, '새 노트')));
+    const cfg = getCloud();
+    if (!cfg || cfg.mode === 'owner') {
+      g.append(h('button', { class: 'card new-card', onclick: () => worksheetDialog(this.app) },
+        h('div', { class: 'cover new-cover', html: icons.template }), h('div', { class: 'card-title' }, '문제지 만들기')));
+    }
     for (const nb of list) {
       const cover = nb.thumb
         ? h('div', { class: 'cover thumb-cover', style: { '--cover': nb.cover } }, h('img', { src: nb.thumb, alt: '', draggable: 'false' }))
@@ -119,7 +131,10 @@ export class Library {
     if (!cfg || nb.remoteId) return [];
     const on = shouldSync(nb, cfg);
     const label = cfg.mode === 'student' ? '선생님께 제출' : '클라우드에 저장';
-    return ['-', {
+    const assign = cfg.mode === 'owner'
+      ? [{ label: nb.taskInfo?.assignedAt ? '과제 다시 내주기' : '과제로 내주기', icon: icons.share || icons.upload, action: () => assignDialog(nb.id) }]
+      : [];
+    return ['-', ...assign, {
       label, icon: icons.cloud, checked: on,
       action: async () => {
         const fresh = await db.getNotebook(nb.id);
