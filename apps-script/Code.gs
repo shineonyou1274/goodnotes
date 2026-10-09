@@ -957,7 +957,8 @@ function aiSettings_() {
   const v = aiSheet_().getRange(1, 2, 5, 1).getValues();
   return {
     showScore: String(v[4][0]).trim() === '예',
-    key: String(v[0][0] || '').trim(),
+    // 복사할 때 딸려 온 띄어쓰기·따옴표·보이지 않는 글자를 뺀다
+    key: String(v[0][0] || '').replace(/[\s'"`\u200B-\u200D\uFEFF]/g, ''),
     autoReturn: String(v[1][0]).trim() === '예',
     ask: String(v[2][0] || '').trim() || '친절하게, 5문장 이내.',
     model: String(v[3][0] || '').trim(),
@@ -984,7 +985,8 @@ function askAI_(ai, prompt, opt) {
     const content = [];
     if (opt.pdf) content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: opt.pdf } });
     content.push({ type: 'text', text: prompt });
-    body = { model: ai.model || 'claude-sonnet-5-5', max_tokens: 2000, messages: [{ role: 'user', content: content }] };
+    // 답하기 전에 생각하는 모델이라 답 길이를 넉넉히 준다
+    body = { model: ai.model || 'claude-sonnet-5-5', max_tokens: 16000, messages: [{ role: 'user', content: content }] };
   } else {
     url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(ai.model || 'gemini-flash-latest') + ':generateContent';
     headers = { 'x-goog-api-key': ai.key };
@@ -1004,16 +1006,20 @@ function askAI_(ai, prompt, opt) {
     try { json = JSON.parse(res.getContentText()); } catch (e) { json = {}; }
     if (code >= 300) {
       const msg = String((json.error && json.error.message) || res.getContentText()).slice(0, 200);
-      if (code === 429) throw new Error('AI 사용량 한도에 걸렸습니다. 잠시 뒤 다시 해 주세요.');
-      if (code === 401 || code === 403 || /api.?key|authentication/i.test(msg)) throw new Error("AI 키가 맞지 않습니다. 'AI 설정' 탭의 키를 확인하세요.");
-      if (/quota|billing|credit/i.test(msg)) throw new Error('AI 요금 잔액이 없습니다. 키를 만든 사이트의 Billing에서 충전해 주세요.');
-      throw new Error('AI 요청 실패 (' + code + '): ' + msg);
+      const who = providerName_(ai) + ' (' + code + ') ';
+      // 원래 오류 문장도 함께 보여 줘야 무엇이 문제인지 알 수 있다
+      if (code === 429) throw new Error(who + '사용량 한도에 걸렸습니다. 잠시 뒤 다시 해 주세요. [' + msg + ']');
+      if (/credit|billing|quota|balance/i.test(msg)) throw new Error(who + '요금 잔액이 없습니다. 키를 만든 사이트의 Billing에서 충전해 주세요. [' + msg + ']');
+      if (code === 404 || /model/i.test(msg) && /not.?found|does not exist|invalid/i.test(msg)) throw new Error(who + "모델 이름이 맞지 않습니다. 'AI 설정' 탭 B4(모델) 칸을 비워 보세요. [" + msg + ']');
+      if (code === 401 || code === 403 || /api.?key|x-api-key|authentication/i.test(msg)) throw new Error(who + "키가 맞지 않습니다. 키 전체를 다시 복사해 B1 칸에 넣어 주세요. [" + msg + ']');
+      throw new Error(who + '요청 실패: ' + msg);
     }
     let text = '';
     if (gpt) {
       text = json.output_text || (json.output || []).reduce((all, o) => all.concat(o.type === 'message' ? o.content || [] : []), [])
         .filter((c) => c.type === 'output_text').map((c) => c.text).join('');
     } else if (claude) {
+      if (json.stop_reason === 'refusal') throw new Error('Claude가 이 요청에는 답하지 않았습니다. 다시 해 보거나 다른 AI 키를 써 주세요.');
       text = (json.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
     } else {
       const cand = (json.candidates || [])[0];
@@ -1045,9 +1051,20 @@ function aiQuestions_(req, who) {
   return { questions: list(data.questions), answers: list(data.answers), keywords: list(data.keywords), rubric: normRubric_(data.rubric) };
 }
 
+function providerName_(ai) {
+  if (/^sk-ant-/.test(ai.key)) return 'Claude';
+  if (/^sk-/.test(ai.key)) return 'ChatGPT';
+  return 'Gemini';
+}
+
 function AI연결시험() {
   let msg;
-  try { msg = 'AI 연결 성공! 답: ' + askAI_(aiSettings_(), '“연결 성공”이라고만 답하세요.'); } catch (e) { msg = e.message; }
+  const ai = aiSettings_();
+  if (!ai.key) msg = "'AI 설정' 탭 B1 칸에 AI 키를 먼저 넣어 주세요.";
+  else if (!/^(sk-|AIza)/.test(ai.key)) msg = '키 모양이 낯섭니다. Gemini 키는 AIza…, ChatGPT 키는 sk-…, Claude 키는 sk-ant-…로 시작합니다. 키 전체를 다시 복사해 주세요.';
+  else {
+    try { msg = providerName_(ai) + ' 연결 성공! 답: ' + askAI_(ai, '“연결 성공”이라고만 답하세요.'); } catch (e) { msg = e.message; }
+  }
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
 }
 
