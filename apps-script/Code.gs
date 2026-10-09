@@ -85,25 +85,40 @@ function settingsSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new Error('이 스크립트는 구글 시트의 [확장 프로그램 → Apps Script]에서 만들어야 합니다.');
   let sh = ss.getSheetByName(SETTINGS_SHEET);
-  if (sh) return sh;
+  if (sh) {
+    // 예전 버전의 긴 설명은 짧게 바꾼다
+    if (String(sh.getRange(1, 3).getValue()).indexOf('← 노트 앱에서') === 0) writeHelp_(sh);
+    return sh;
+  }
   sh = ss.insertSheet(SETTINGS_SHEET, 0);
-  sh.getRange(1, 1, 5, 3).setValues([
-    ['관리자 비밀번호', randomText_(10), '← 노트 앱에서 "내 저장소(관리자)"로 연결할 때 씁니다. 학생에게 알려 주지 마세요. 원하면 8자 이상으로 바꿔도 됩니다.'],
-    ['노트 앱 주소', DEFAULT_APP_URL, '← 보통은 그대로 둡니다.'],
-    ['관리자 연결 링크', '', '← 배포한 뒤 자동으로 채워집니다. 내 태블릿에서 이 링크를 열고 비밀번호만 넣으면 연결됩니다.'],
-    ['', '', ''],
-    ['반 이름', '수업 코드', '학생 초대 링크'],
+  sh.getRange(1, 1, 5, 2).setValues([
+    ['관리자 비밀번호', randomText_(10)],
+    ['노트 앱 주소', DEFAULT_APP_URL],
+    ['관리자 연결 링크', ''],
+    ['', ''],
+    ['반 이름', '수업 코드'],
   ]);
+  writeHelp_(sh);
   sh.getRange(1, 1, 3, 1).setFontWeight('bold');
   sh.getRange(5, 1, 1, 3).setFontWeight('bold').setBackground('#eef2fd');
   sh.getRange(1, 2).setBackground('#fff6d6');
   sh.getRange(1, 3, 3, 1).setFontColor('#6e6e73');
-  sh.getRange(4, 1).setValue('아래 “반 이름” 칸에 반을 한 줄에 하나씩 적으세요 (예: 2학년 3반 수학). 수업 코드와 초대 링크는 자동으로 채워집니다. 혼자 쓸 때는 비워 두세요.');
   sh.getRange(4, 1).setFontColor('#3a6df0');
   sh.setColumnWidth(1, 170);
   sh.setColumnWidth(2, 220);
   sh.setColumnWidth(3, 520);
   return sh;
+}
+
+// '설정' 탭의 짧은 설명
+function writeHelp_(sh) {
+  sh.getRange(1, 3, 3, 1).setValues([
+    ['← 8자 이상. 학생에게 비밀'],
+    ['← 그대로 두세요'],
+    ['← 앱에서 연결하면 자동으로 채워짐'],
+  ]);
+  sh.getRange(4, 1).setValue('↓ 반 이름만 쓰세요 (예: 2학년 3반). 코드와 링크는 자동');
+  sh.getRange(5, 3).setValue('학생 초대 링크');
 }
 
 // 비밀번호와 반 목록을 읽는다. 수업 코드가 빈 반에는 코드를 새로 만들어 적는다.
