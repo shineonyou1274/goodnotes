@@ -1,5 +1,5 @@
 // 오프라인에서도 앱이 열리도록 파일을 저장해 둔다
-const VERSION = 'v7';
+const VERSION = 'v8';
 const CACHE = `goodnotes-web-${VERSION}`;
 const SHELL = [
   './',

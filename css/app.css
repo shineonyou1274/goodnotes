@@ -663,3 +663,18 @@ a.btn { text-decoration: none; color: inherit; }
 .snippet { color: var(--muted); font-size: 14px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .snippet mark { background: #ffe066; color: #1c1c1e; border-radius: 3px; padding: 0 2px; }
 .class-filter { margin-bottom: 8px; }
+.submit-btn {
+  height: 36px;
+  padding: 0 16px;
+  margin: 0 6px;
+  border-radius: 18px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+}
+.submit-btn.done { background: rgba(46, 164, 79, 0.14); color: #1f8a3e; }
+@media (prefers-color-scheme: dark) { .submit-btn.done { color: #5fd17f; } }
+.guide-list { padding-left: 20px; margin: 0; line-height: 1.9; font-size: 16px; }
+.guide-list b { color: var(--accent); }

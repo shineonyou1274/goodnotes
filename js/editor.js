@@ -7,6 +7,7 @@ import { renderPageCanvas, ensurePageImages, loadImage } from './render.js';
 import { saveSettings, PEN_PALETTE, HIGHLIGHTER_PALETTE } from './settings.js';
 import { exportPdf, pdfToPages } from './pdf.js';
 import { exportBackup } from './backup.js';
+import { getCloud, shouldSync, needsSync, uploadNotebook } from './cloud.js';
 import {
   h, toast, progress, dialog, confirmDialog, promptDialog, popover, menu, closePopovers,
   saveFile, pickFile, safeFileName,
@@ -46,6 +47,7 @@ export class Editor {
       this.titleBtn,
       this.nb.remoteId ? h('span', { class: 'badge student' }, this.nb.remoteName || '학생') : null,
       h('div', { class: 'spacer' }),
+      this.submitBtn = this.makeSubmitBtn(),
       this.undoBtn, this.redoBtn,
       h('div', { class: 'sep' }),
       this.pagesBtn,
@@ -89,6 +91,40 @@ export class Editor {
     this._onHide = () => { if (document.visibilityState === 'hidden') this.flush(); };
     document.addEventListener('visibilitychange', this._onHide);
     window.addEventListener('pagehide', this._onHide);
+  }
+
+  // 학생: 선생님께 제출하는 버튼 (노트를 닫아도 자동으로 제출된다)
+  makeSubmitBtn() {
+    const cfg = getCloud();
+    if (!cfg || cfg.mode !== 'student' || !shouldSync(this.nb, cfg)) return null;
+    const btn = h('button', { class: 'submit-btn', onclick: () => this.submit() }, '제출하기');
+    db.getNotebook(this.nb.id).then((cur) => this.setSubmitted(cur && !needsSync(cur, cfg) && cur.syncedAt));
+    return btn;
+  }
+
+  setSubmitted(done) {
+    if (!this.submitBtn) return;
+    this.submitBtn.textContent = done ? '제출됨 ✓' : '제출하기';
+    this.submitBtn.classList.toggle('done', !!done);
+  }
+
+  async submit() {
+    if (this.submitting) return;
+    this.submitting = true;
+    this.view.endTextEdit();
+    try {
+      await this.flush();
+      progress('선생님께 제출하는 중…');
+      const sent = await uploadNotebook(this.nb.id, (m) => progress(m));
+      progress(null);
+      this.setSubmitted(true);
+      toast(sent ? '선생님께 제출했습니다 ✓' : '이미 제출했습니다. 고친 내용이 없어요.');
+    } catch (e) {
+      progress(null);
+      toast('제출하지 못했습니다: ' + e.message, 5000);
+    } finally {
+      this.submitting = false;
+    }
   }
 
   _iconBtn(icon, label, onclick, extra = {}) {
@@ -294,6 +330,7 @@ export class Editor {
     this.dirty.add(page);
     this.nbDirty = true;
     this.contentChanged = true;
+    this.setSubmitted(false);
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.flush(), 700);
     if (this.panelOpen) {

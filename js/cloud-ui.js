@@ -60,13 +60,26 @@ export async function connectDialog(prefill = {}) {
       cfg.className = info.className || '';
       if (mode === 'owner') cfg.classes = info.classes || [];
       setCloud(cfg);
-      toast(mode === 'owner' ? '내 저장소에 연결했습니다' : `${cfg.className || '수업'}에 참여했습니다`);
+      if (mode === 'owner') toast('내 저장소에 연결했습니다');
+      else await studentGuide(cfg);
       return cfg;
     } catch (e) {
       progress(null);
       toast(e.message, 9000);
     }
   }
+}
+
+// 학생이 처음 참여했을 때 보여 주는 짧은 안내
+function studentGuide(cfg) {
+  return dialog({
+    title: `${cfg.className || '수업'}에 참여했어요`,
+    body: h('ol', { class: 'guide-list' },
+      h('li', {}, h('b', {}, '+ 새 노트'), '를 만들어 펜으로 쓰세요.'),
+      h('li', {}, '다 쓰면 위쪽의 ', h('b', {}, '제출하기'), '를 한 번 누르세요.'),
+      h('li', {}, h('b', {}, '제출됨 ✓'), '이 보이면 끝! 고쳐 쓰면 다시 ', h('b', {}, '제출하기'), '가 됩니다.')),
+    buttons: [{ label: '알겠어요', value: true, primary: true }],
+  });
 }
 
 export async function runSync(lib) {

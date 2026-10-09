@@ -22,49 +22,39 @@
     pre { background: #1e1e22; color: #e8e8ee; border-radius: var(--radius); padding: 14px; max-height: 300px; overflow: auto; font-size: 12px; }
     a { color: var(--accent); }
     .muted { font-size: 14px; }
+    .warn-card { margin-top: 10px; border-color: #f2c94c; background: rgba(242, 201, 76, 0.12); }
   </style>
 </head>
 <body>
 <main>
   <a href="./">← 노트 앱으로</a>
-  <h1>클라우드 연결 (처음 한 번)</h1>
-  <p class="muted">필기만 할 거라면 이 설정은 필요 없습니다. 동기화·손글씨 검색·학생 노트 모아 보기를 쓸 때만 하세요.</p>
+  <h1>클라우드 연결</h1>
+  <p class="muted">필기만 할 거면 필요 없습니다. 학생 노트를 모아 보거나 손글씨를 검색할 때만 하세요.</p>
 
-  <h2>1. 선생님: 설치 (PC에서 10분)</h2>
+  <h2>선생님 (PC에서, 처음 한 번)</h2>
   <div class="card">
     <ol>
-      <li><a href="https://sheets.new" target="_blank" rel="noopener">새 구글 시트</a> → 메뉴 <b>확장 프로그램 → Apps Script</b></li>
-      <li>코드 칸을 비우고(<kbd>Ctrl+A</kbd> → <kbd>Delete</kbd>) <button class="btn primary" id="copy" style="height:32px">코드 복사</button> 한 것을 붙여 넣기 → <kbd>Ctrl+S</kbd></li>
-      <li>위쪽에서 <b>설치확인</b> 고르고 <b>실행</b> → 권한 <b>허용</b><br><span class="muted">(“확인하지 않은 앱”이 나오면 고급 → 이동 → 허용)</span></li>
-      <li><b>배포 → 새 배포 → 웹 앱</b>, 액세스 권한 <b>모든 사용자</b> → 배포</li>
-      <li>시트의 <b>설정</b> 탭에서 비밀번호를 <b>8자 이상</b>으로 정하고, 반 이름을 적기</li>
+      <li><a href="https://sheets.new" target="_blank" rel="noopener">새 구글 시트</a> → <b>확장 프로그램 → Apps Script</b></li>
+      <li>코드 칸 비우기(<kbd>Ctrl+A</kbd> → <kbd>Delete</kbd>) → <button class="btn primary" id="copy" style="height:32px">코드 복사</button> → 붙여 넣기 → <kbd>Ctrl+S</kbd></li>
+      <li><b>설치확인</b> 고르고 <b>실행</b> → <b>허용</b></li>
+      <li><b>배포 → 새 배포 → 웹 앱</b>, 액세스 <b>모든 사용자</b> → 배포 → <b>웹 앱 주소 복사</b></li>
+      <li>시트 <b>설정</b> 탭: 비밀번호를 <b>영문+숫자 8자 이상</b>으로 (예: <code>note2026ok</code>), 반 이름 적기</li>
+      <li>노트 앱 <b>구름 버튼</b> → <b>내 저장소</b> → 주소와 비밀번호 넣고 <b>연결</b>. <b>끝!</b></li>
     </ol>
   </div>
+  <div class="card warn-card">⚠ <b>새 배포는 처음 한 번만.</b> 다시 하면 주소가 바뀌어 학생 링크가 끊깁니다.<br>코드를 바꿀 때는 <b>배포 관리 → ✏ → 새 버전</b>.</div>
 
-  <h2>2. 선생님: 내 태블릿 연결</h2>
+  <h2>학생에게 보내기</h2>
   <div class="card">
-    <ol>
-      <li>노트 앱 첫 화면 오른쪽 위 <b>구름 버튼</b></li>
-      <li><b>내 저장소 (관리자)</b> → 웹 앱 주소(<code>…/exec</code>)와 비밀번호 → <b>연결</b></li>
-      <li>연결되면 구름 버튼에 <b>반별 초대 링크</b>가 생깁니다 → 학생에게 보내기</li>
-    </ol>
+    구름 버튼의 <b>반별 초대 링크</b>를 복사해 보내세요. 학생은 링크 열고 이름 쓰고, 노트를 쓴 뒤 <b>제출하기</b>만 누르면 됩니다.
   </div>
-
-  <h2>3. 학생</h2>
-  <div class="card">
-    <ol>
-      <li>선생님이 보낸 <b>초대 링크</b> 열기 → 이름(학번 이름) → <b>연결</b></li>
-      <li>노트에 쓰고 왼쪽 위 <b>←</b> 누르기 → 자동 제출 (<b>제출됨</b> 표시)</li>
-    </ol>
-  </div>
-  <p class="muted">선생님은 시트의 <b>노트</b> 탭(PDF 링크)이나 앱의 구름 버튼에서 학생 노트를 봅니다. 검색창에 낱말 + <kbd>Enter</kbd>로 손글씨도 찾습니다.</p>
+  <p class="muted">학생 노트는 시트의 <b>노트</b> 탭(PDF 링크)이나 앱의 구름 버튼에서 봅니다.</p>
 
   <details>
     <summary>연결이 안 될 때</summary>
     <ul>
-      <li><b>“비밀번호를 8자 이상으로”</b> → 설정 탭 비밀번호를 8자 이상(영문+숫자)으로</li>
+      <li><b>“비밀번호를 … 바꿔 주세요”</b> → 설정 탭 비밀번호를 영문+숫자 8자 이상으로</li>
       <li><b>“서버에 연결하지 못했습니다”</b> → 웹 앱 주소를 새 탭에서 열어 보기. “노트 앱 서버가 동작 중”이 보여야 정상. 안 보이면 <b>배포 → 배포 관리</b>에서 <code>/exec</code> 주소를 다시 복사</li>
-      <li>코드를 고칠 때는 <b>새 배포 말고</b> 배포 관리 → 연필 → <b>새 버전</b> (주소가 그대로 유지됨)</li>
       <li>학교 계정은 막혀 있을 수 있으니 <b>개인 Gmail</b>로 만드세요</li>
     </ul>
   </details>

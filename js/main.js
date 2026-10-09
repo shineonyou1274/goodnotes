@@ -41,8 +41,8 @@ function backgroundSync(id) {
     const nb = await db.getNotebook(id);
     if (!nb || !needsSync(nb)) return;
     try {
-      await uploadNotebook(id);
-      toast(`“${nb.title}” 클라우드에 저장했습니다`);
+      const sent = await uploadNotebook(id);
+      if (sent) toast(getCloud()?.mode === 'student' ? `“${nb.title}” 선생님께 제출했습니다 ✓` : `“${nb.title}” 클라우드에 저장했습니다`);
     } catch (e) {
       console.error(e);
       toast('클라우드에 올리지 못했습니다. 나중에 “동기화”를 눌러 주세요.', 3500);

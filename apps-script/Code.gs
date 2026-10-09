@@ -60,7 +60,9 @@ const ACTIONS = {
 function authorize_(req) {
   const st = settings_();
   if (req.key !== undefined) {
-    if (st.key.length < 8) throw new Error("시트 '설정' 탭의 관리자 비밀번호를 8자 이상으로 적어 주세요.");
+    if (st.key.length < 8 || !/[a-zA-Z]/.test(st.key) || !/[0-9]/.test(st.key)) {
+      throw new Error("시트 '설정' 탭의 관리자 비밀번호를 영문과 숫자를 섞어 8자 이상으로 바꿔 주세요. (예: note2026ok)");
+    }
     if (String(req.key) !== st.key) throw new Error('비밀번호가 맞지 않습니다.');
     return { role: 'owner', owner: 'owner', name: '관리자', cls: '' };
   }
@@ -74,6 +76,13 @@ function authorize_(req) {
 }
 
 /* ---------- '설정' 탭 ---------- */
+// 영문과 숫자가 섞인 비밀번호
+function newPassword_() {
+  let p = '';
+  while (!/[a-z]/.test(p) || !/[0-9]/.test(p)) p = randomText_(10);
+  return p;
+}
+
 function randomText_(n) {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
   let out = '';
@@ -87,12 +96,13 @@ function settingsSheet_() {
   let sh = ss.getSheetByName(SETTINGS_SHEET);
   if (sh) {
     // 예전 버전의 긴 설명은 짧게 바꾼다
-    if (String(sh.getRange(1, 3).getValue()).indexOf('← 노트 앱에서') === 0) writeHelp_(sh);
+    const c1 = String(sh.getRange(1, 3).getValue());
+    if (c1.indexOf('← 노트 앱에서') === 0 || c1 === '← 8자 이상. 학생에게 비밀') writeHelp_(sh);
     return sh;
   }
   sh = ss.insertSheet(SETTINGS_SHEET, 0);
   sh.getRange(1, 1, 5, 2).setValues([
-    ['관리자 비밀번호', randomText_(10)],
+    ['관리자 비밀번호', newPassword_()],
     ['노트 앱 주소', DEFAULT_APP_URL],
     ['관리자 연결 링크', ''],
     ['', ''],
@@ -113,7 +123,7 @@ function settingsSheet_() {
 // '설정' 탭의 짧은 설명
 function writeHelp_(sh) {
   sh.getRange(1, 3, 3, 1).setValues([
-    ['← 8자 이상. 학생에게 비밀'],
+    ['← 영문+숫자 8자 이상 (예: note2026ok). 학생에게 비밀'],
     ['← 그대로 두세요'],
     ['← 앱에서 연결하면 자동으로 채워짐'],
   ]);
@@ -306,6 +316,13 @@ function uploadNote_(req, who) {
   lock.waitLock(30000);
   try {
     const sh = notesSheet_();
+    // 같은 노트가 두 줄로 들어간 적이 있으면 하나만 남긴다
+    const dups = rows_(sh).filter((x) => x.r[C.id] === meta.id);
+    for (let i = dups.length - 1; i >= 1; i--) {
+      trash_(dups[i].r[C.file]);
+      if (dups[i].r[C.pdf]) trash_(fileIdFromUrl_(dups[i].r[C.pdf]));
+      sh.deleteRow(dups[i].row);
+    }
     const cur = findNote_(meta.id);
     const values = [
       meta.id, String(meta.title || '제목 없음'), who.cls, who.role === 'owner' ? '관리자' : who.name, who.owner,
@@ -331,6 +348,7 @@ function uploadNote_(req, who) {
     }
     refreshNoteText_(meta.id);
   } finally {
+    SpreadsheetApp.flush(); // 다음 요청이 방금 쓴 줄을 보도록 먼저 기록한다
     lock.releaseLock();
   }
   return {};
@@ -372,6 +390,7 @@ function ocrPages_(req, who) {
     });
     refreshNoteText_(req.id);
   } finally {
+    SpreadsheetApp.flush(); // 다음 요청이 방금 쓴 줄을 보도록 먼저 기록한다
     lock.releaseLock();
   }
   return { done: done };
@@ -489,6 +508,7 @@ function removeNote_(req, who) {
     const trows = rows_(tsh).filter((x) => x.r[0] === req.id);
     for (let i = trows.length - 1; i >= 0; i--) tsh.deleteRow(trows[i].row);
   } finally {
+    SpreadsheetApp.flush(); // 다음 요청이 방금 쓴 줄을 보도록 먼저 기록한다
     lock.releaseLock();
   }
   return {};

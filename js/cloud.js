@@ -98,10 +98,20 @@ async function pageImage(page) {
   return blob ? blobToBase64(blob) : null;
 }
 
-// 노트 하나를 올리고, 바뀐 페이지의 손글씨를 글자로 읽게 한다
-export async function uploadNotebook(nbId, onProgress = () => {}) {
+// 올리기는 한 번에 하나씩만 한다 (노트를 닫자마자 '동기화'를 눌러도 두 번 올라가지 않게)
+let uploadQueue = Promise.resolve();
+
+// 노트 하나를 올리고, 바뀐 페이지의 손글씨를 글자로 읽게 한다.
+// 이미 올린 뒤로 바뀐 것이 없으면 아무것도 하지 않고 false를 돌려준다.
+export function uploadNotebook(nbId, onProgress = () => {}) {
+  const run = uploadQueue.then(() => doUpload(nbId, onProgress));
+  uploadQueue = run.catch(() => {});
+  return run;
+}
+
+async function doUpload(nbId, onProgress) {
   const nb = await db.getNotebook(nbId);
-  if (!nb) return;
+  if (!nb || !needsSync(nb)) return false;
   const pages = await loadPages(nb);
   const version = nb.updatedAt;
   onProgress('노트 올리는 중…');
@@ -136,6 +146,7 @@ export async function uploadNotebook(nbId, onProgress = () => {}) {
     cur.syncedAt = version;
     await db.putNotebook(cur);
   }
+  return true;
 }
 
 // 서버의 노트를 기기로 가져온다. asCopy이면 학생 노트를 보기용 사본으로 저장한다.
@@ -206,8 +217,7 @@ export async function syncAll(onProgress = () => {}) {
   local = await db.getAllNotebooks();
   for (const nb of local) {
     if (!needsSync(nb, cfg)) continue;
-    await uploadNotebook(nb.id, (m) => onProgress(`“${nb.title}” ${m}`));
-    pushed++;
+    if (await uploadNotebook(nb.id, (m) => onProgress(`“${nb.title}” ${m}`))) pushed++;
   }
   return { pulled, pushed };
 }
