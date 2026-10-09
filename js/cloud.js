@@ -59,7 +59,7 @@ async function call(action, body = {}, cfg = getCloud()) {
   return data;
 }
 
-export const ping = (cfg) => call('ping', {}, cfg);
+export const ping = (cfg) => call('ping', { selfUrl: cfg?.url }, cfg);
 export const listRemote = () => call('list').then((d) => d.notes || []);
 export const searchRemote = (q) => call('search', { q }).then((d) => d.results || []);
 export const removeRemote = (id) => call('remove', { id });

@@ -43,7 +43,8 @@ const ACTIONS = {
       // 관리자에게만 반 목록(초대 링크용)을 알려 주고, 시트의 초대 링크도 채운다
       const st = settings_();
       classes = Object.keys(st.classes).map((code) => ({ code: code, name: st.classes[code] }));
-      try { refreshLinks_(); } catch (e) { /* 링크 채우기는 실패해도 된다 */ }
+      // 앱이 실제로 접속한 주소로 시트의 링크를 채운다 (가장 정확한 주소)
+      try { refreshLinks_(req.selfUrl); } catch (e) { /* 링크 채우기는 실패해도 된다 */ }
     }
     return { role: who.role, name: who.name, className: who.cls, classes: classes };
   },
@@ -131,12 +132,23 @@ function settings_() {
   };
 }
 
-// '설정' 탭에 웹 앱 주소와 반별 초대 링크를 채운다
-function refreshLinks_() {
+// '설정' 탭에 웹 앱 주소와 반별 초대 링크를 채운다.
+// 배포가 여러 개면 ScriptApp이 옛 주소를 돌려줄 때가 있어서, 노트 앱이 접속한 주소를 먼저 쓴다.
+function refreshLinks_(fromApp) {
   const st = settings_();
+  const props = PropertiesService.getScriptProperties();
+  const valid = (u) => /^https:\/\/script\.google\.com\/.*\/exec$/.test(String(u || ''));
   let webUrl = '';
-  try { webUrl = ScriptApp.getService().getUrl() || ''; } catch (e) { webUrl = ''; }
-  if (!/\/exec$/.test(webUrl)) return false;
+  if (valid(fromApp)) {
+    webUrl = String(fromApp);
+    props.setProperty('webUrl', webUrl);
+  } else {
+    webUrl = props.getProperty('webUrl') || '';
+    if (!valid(webUrl)) {
+      try { webUrl = ScriptApp.getService().getUrl() || ''; } catch (e) { webUrl = ''; }
+    }
+  }
+  if (!valid(webUrl)) return false;
   const sh = st.sheet;
   const base = st.appUrl.replace(/#.*$/, '');
   const adminLink = base + '#/join?u=' + encodeURIComponent(webUrl);
