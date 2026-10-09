@@ -31,7 +31,7 @@ const C = {
 };
 const T = { id: 0, title: 1, cls: 2, due: 3, keys: 4, rubric: 5, count: 6, file: 7, created: 8, criteria: 9 };
 const ALL_CLASSES = '모든 반';
-const AI_GUIDE_VER = '안내 v3'; // 'AI 설정' 탭 안내를 바꾸면 올린다 (예전 탭은 자동으로 새 안내로 바뀐다)
+const AI_GUIDE_VER = '안내 v4'; // 'AI 설정' 탭 안내를 바꾸면 올린다 (예전 탭은 자동으로 새 안내로 바뀐다)
 
 function doGet() {
   return out_({ ok: true, app: 'goodnotes-web', message: '노트 앱 서버가 동작 중입니다.' });
@@ -463,12 +463,19 @@ function ocrPages_(req, who) {
   const started = Date.now();
   const done = [];
   const results = [];
+  const ai = aiSettings_();
   for (const p of req.pages || []) {
     if (Date.now() - started > 240000) break; // Apps Script 실행 시간 제한(6분) 안에서 멈춘다
     let text = '';
     if (p.image) {
-      try { text = ocrImage_(Utilities.newBlob(Utilities.base64Decode(p.image), 'image/jpeg', 'page.jpg')); }
-      catch (e) { text = ''; }
+      // 'AI 설정'에서 고르면 AI가 읽고, 안 되면 구글 드라이브 글자 인식으로 읽는다
+      if (ai.aiOcr && ai.key) {
+        try { text = aiReadImage_(ai, p.image); } catch (e) { text = ''; }
+      }
+      if (!text) {
+        try { text = ocrImage_(Utilities.newBlob(Utilities.base64Decode(p.image), 'image/jpeg', 'page.jpg')); }
+        catch (e) { text = ''; }
+      }
     }
     results.push({ pageId: p.pageId, page: (p.index || 0) + 1, text: text });
     done.push(p.pageId);
@@ -491,6 +498,15 @@ function ocrPages_(req, who) {
     lock.releaseLock();
   }
   return { done: done };
+}
+
+// AI로 손글씨 읽기: 그림 속 글자를 그대로 옮겨 적게 한다
+function aiReadImage_(ai, base64) {
+  const t = askAI_(ai, [
+    '이 그림은 학생 노트의 한 쪽이다. 손글씨와 글자를 보이는 그대로 옮겨 적어라.',
+    '줄바꿈은 살리고, 설명·요약·맞춤법 고치기는 하지 마라. 글자가 없으면 빈 답을 하라.',
+  ].join('\n'), { image: base64 });
+  return String(t).replace(/^```[a-z]*\n?|```$/g, '').trim();
 }
 
 function ocrImage_(blob) {
@@ -944,12 +960,16 @@ function aiSheet_() {
     if (!String(sh.getRange(5, 1).getValue())) {
       sh.getRange(5, 1, 1, 3).setValues([['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임']]);
     }
-    // 안내가 예전 것이면 새 안내로 바꾼다. 예전 탭에는 '워크스페이스 ID' 줄이 없으니 6줄에 넣는다 (넣어 둔 값은 지키기)
-    if (String(sh.getRange(7, 3).getValue()) !== AI_GUIDE_VER) {
-      const hasWs = String(sh.getRange(6, 1).getValue()) === '워크스페이스 ID';
-      const ws = hasWs ? sh.getRange(6, 2).getValue() : '';
-      sh.getRange(6, 1, 1, 3).setValues([['워크스페이스 ID', ws, '← Claude 개인 키(sk-ant-usr…)만: 키가 작업 공간을 고르지 않았다면 wrkspc_…를 넣으세요']]);
+    // 안내가 예전 것이면 새 안내로 바꾼다. 예전 탭에 없던 6·7줄을 넣는다 (넣어 둔 값은 지키기)
+    if (String(sh.getRange(8, 3).getValue()) !== AI_GUIDE_VER) {
+      const v = sh.getRange(6, 1, 2, 2).getValues();
+      const ws = v[0][0] === '워크스페이스 ID' ? v[0][1] : '';
+      const aiOcr = v[1][0] === '손글씨도 AI로 읽기' ? v[1][1] : '아니오';
       writeAiGuide_(sh);
+      sh.getRange(6, 1, 2, 3).setValues([['워크스페이스 ID', ws, '← Claude 개인 키(sk-ant-usr…)만: 키가 작업 공간을 고르지 않았다면 wrkspc_…를 넣으세요'], ['손글씨도 AI로 읽기', aiOcr, '← 예: 손글씨 검색·낱말 확인을 AI가 읽은 글자로 (더 정확, 쪽마다 AI 요금) / 아니오: 구글 드라이브 무료 글자 인식']]);
+      sh.getRange(6, 1, 2, 1).setFontWeight('bold');
+      sh.getRange(6, 3, 2, 1).setFontColor('#6e6e73');
+      try { sh.getRange(7, 2).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['예', '아니오']).build()); } catch (e) { /* 없어도 된다 */ }
     }
     return sh;
   }
@@ -961,12 +981,13 @@ function aiSheet_() {
     ['모델', '', '← 비워 두면 자동'],
     ['점수 보여 주기', '아니오', '← 예: 피드백을 돌려줄 때 루브릭 점수도 학생에게 보임'],
     ['워크스페이스 ID', '', '← Claude 개인 키(sk-ant-usr…)만: 키가 작업 공간을 고르지 않았다면 wrkspc_…를 넣으세요'],
+    ['손글씨도 AI로 읽기', '아니오', '← 예: 손글씨 검색·낱말 확인을 AI가 읽은 글자로 (더 정확, 쪽마다 AI 요금) / 아니오: 구글 드라이브 무료 글자 인식'],
   ];
   sh.getRange(1, 1, rows.length, 3).setValues(rows);
   writeAiGuide_(sh);
-  sh.getRange(1, 1, 6, 1).setFontWeight('bold');
+  sh.getRange(1, 1, 7, 1).setFontWeight('bold');
   sh.getRange(1, 2, 1, 1).setBackground('#fff6d6');
-  sh.getRange(1, 3, 6, 1).setFontColor('#6e6e73');
+  sh.getRange(1, 3, 7, 1).setFontColor('#6e6e73');
   sh.setColumnWidth(1, 130);
   sh.setColumnWidth(2, 460);
   sh.setColumnWidth(3, 420);
@@ -974,11 +995,12 @@ function aiSheet_() {
     const yesNo = SpreadsheetApp.newDataValidation().requireValueInList(['예', '아니오']).build();
     sh.getRange(2, 2).setDataValidation(yesNo);
     sh.getRange(5, 2).setDataValidation(yesNo);
+    sh.getRange(7, 2).setDataValidation(yesNo);
   } catch (e) { /* 목록 상자는 없어도 된다 */ }
   return sh;
 }
 
-// 'AI 설정' 탭 7줄부터: 키 받는 방법
+// 'AI 설정' 탭 8줄부터: 키 받는 방법
 function writeAiGuide_(sh) {
   const rows = [
     ['AI 키 받는 방법', '셋 중 하나만 넣으면 됩니다. 키 모양을 보고 앱이 알아서 고릅니다.', AI_GUIDE_VER],
@@ -995,17 +1017,18 @@ function writeAiGuide_(sh) {
     ['•', "루브릭은 앱에서 과제를 내줄 때 정합니다. '과제' 탭 [루브릭] 칸에서도 고칠 수 있습니다. (한 줄에 하나: 기준 | 배점 | 잘함: … / 보통: … / 부족: …)", ''],
     ['•', '모델 칸을 비우면 Gemini는 gemini-flash-latest, ChatGPT는 gpt-5-mini, Claude는 claude-sonnet-5-5를 씁니다.', ''],
   ];
-  sh.getRange(7, 1, 20, 3).setValues(Array.from({ length: 20 }, (_, i) => rows[i] || ['', '', '']));
-  sh.getRange(7, 1, 20, 3).setFontWeight('normal').setFontColor('#1c1c1e');
-  sh.getRange(7, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
-  sh.getRange(8, 1, 4, 1).setFontWeight('bold');
-  sh.getRange(8, 3, 4, 1).setFontColor('#6e6e73');
-  sh.getRange(13, 1).setFontWeight('bold');
+  sh.getRange(8, 1, 20, 3).setValues(Array.from({ length: 20 }, (_, i) => rows[i] || ['', '', '']));
+  sh.getRange(8, 1, 20, 3).setFontWeight('normal').setFontColor('#1c1c1e');
+  sh.getRange(8, 1, 1, 2).setFontWeight('bold').setFontColor('#3a6df0');
+  sh.getRange(9, 1, 4, 1).setFontWeight('bold');
+  sh.getRange(9, 3, 4, 1).setFontColor('#6e6e73');
+  sh.getRange(14, 1).setFontWeight('bold');
 }
 
 function aiSettings_() {
-  const v = aiSheet_().getRange(1, 2, 6, 1).getValues();
+  const v = aiSheet_().getRange(1, 2, 7, 1).getValues();
   return {
+    aiOcr: String(v[6][0]).trim() === '예',
     workspace: String(v[5][0] || '').replace(/\s/g, ''),
     showScore: String(v[4][0]).trim() === '예',
     // 복사할 때 딸려 온 띄어쓰기·따옴표·보이지 않는 글자를 뺀다
@@ -1029,6 +1052,7 @@ function askAI_(ai, prompt, opt) {
     headers = { Authorization: 'Bearer ' + ai.key };
     const content = [];
     if (opt.pdf) content.push({ type: 'input_file', filename: 'answer.pdf', file_data: 'data:application/pdf;base64,' + opt.pdf });
+    if (opt.image) content.push({ type: 'input_image', image_url: 'data:image/jpeg;base64,' + opt.image });
     content.push({ type: 'input_text', text: prompt });
     body = { model: ai.model || 'gpt-5-mini', input: [{ role: 'user', content: content }] };
   } else if (claude) {
@@ -1038,6 +1062,7 @@ function askAI_(ai, prompt, opt) {
     if (/^wrkspc_/.test(ai.workspace)) headers['anthropic-workspace-id'] = ai.workspace;
     const content = [];
     if (opt.pdf) content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: opt.pdf } });
+    if (opt.image) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: opt.image } });
     content.push({ type: 'text', text: prompt });
     // 답하기 전에 생각하는 모델이라 답 길이를 넉넉히 준다
     body = { model: ai.model || 'claude-sonnet-5-5', max_tokens: 16000, messages: [{ role: 'user', content: content }] };
@@ -1046,6 +1071,7 @@ function askAI_(ai, prompt, opt) {
     headers = { 'x-goog-api-key': ai.key };
     const parts = [];
     if (opt.pdf) parts.push({ inline_data: { mime_type: 'application/pdf', data: opt.pdf } });
+    if (opt.image) parts.push({ inline_data: { mime_type: 'image/jpeg', data: opt.image } });
     parts.push({ text: prompt });
     body = { contents: [{ role: 'user', parts: parts }] };
     if (opt.json) body.generationConfig = { responseMimeType: 'application/json' };
