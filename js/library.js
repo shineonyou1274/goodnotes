@@ -34,12 +34,12 @@ export class Library {
     });
     this.cloudBtn = h('button', { class: 'icon-btn cloud-btn', title: '클라우드', 'aria-label': '클라우드', html: icons.cloud, onclick: () => cloudPanel(this.app, this) });
     const header = h('header', { class: 'lib-header' },
-      h('h1', {}, '노트'),
+      this.titleEl = h('h1', { class: 'ellipsis' }, '노트'),
       h('div', { class: 'spacer' }),
       h('label', { class: 'search-wrap' }, h('span', { html: icons.search }), this.search),
       this.cloudBtn,
       h('button', { class: 'btn', onclick: (e) => this.importMenu(e.currentTarget) }, h('span', { html: icons.upload }), h('span', { class: 'hide-sm' }, '가져오기')),
-      h('button', { class: 'btn primary', onclick: () => this.createDialog() }, h('span', { html: icons.plus }), h('span', {}, '새 노트')));
+      h('button', { class: 'btn primary', onclick: () => this.createDialog() }, h('span', { html: icons.plus }), h('span', { class: 'hide-xs' }, '새 노트')));
     this.results = h('section', { class: 'search-results hidden' });
     this.tasksEl = h('section', { class: 'tasks hidden' });
     this.grid = h('main', { class: 'grid' });
@@ -60,6 +60,11 @@ export class Library {
     this.notebooks = (await db.getAllNotebooks()).sort((a, b) => b.updatedAt - a.updatedAt);
     const cfg = getCloud();
     this.cloudBtn.classList.toggle('connected', !!cfg);
+    // 학생은 위에 자기 이름을 보여 준다: "김하늘의 노트"
+    const who = cfg?.mode === 'student' && cfg.name ? cfg.name.replace(/^\d+\s*/, '') || cfg.name : '';
+    this.titleEl.textContent = who ? `${who}의 노트` : '노트';
+    this.titleEl.title = cfg?.mode === 'student' ? [cfg.className, cfg.name].filter(Boolean).join(' · ') : '';
+    document.title = who ? `${who}의 노트` : '노트';
     this.renderGrid();
     if (cfg?.mode === 'student') renderStudentTasks(this, this.tasksEl);
     else this.tasksEl.classList.add('hidden');

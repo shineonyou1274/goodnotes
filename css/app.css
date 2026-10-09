@@ -143,7 +143,7 @@ svg { display: block; }
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
-.lib-header h1 { margin: 0; font-size: 26px; font-weight: 700; }
+.lib-header h1 { margin: 0; font-size: 26px; font-weight: 700; min-width: 0; }
 .search-wrap {
   display: flex;
   align-items: center;
@@ -583,7 +583,8 @@ svg { display: block; }
 
 @media (max-width: 600px) {
   .hide-sm { display: none; }
-  .lib-header h1 { font-size: 22px; }
+  .lib-header h1 { font-size: 20px; flex: none; max-width: 44vw; }
+  .search-wrap { min-width: 40px; flex-shrink: 1; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 20px 14px; }
   .title-btn { max-width: 30vw; }
 }
@@ -712,4 +713,8 @@ a.btn { text-decoration: none; color: inherit; }
 @media (prefers-color-scheme: dark) {
   .task-card.done .task-status { color: #5fd17f; }
   .task-card.wait .task-status { color: #ffb84d; }
+}
+@media (max-width: 420px) {
+  .hide-xs { display: none; }
+  .lib-header { gap: 6px; }
 }
